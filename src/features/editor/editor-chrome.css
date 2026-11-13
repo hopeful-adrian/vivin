@@ -11,12 +11,12 @@
 }
 
 .app-shell.theme-dark {
-  --document-background: #1b2635;
-  --document-text: #cbd7e6;
-  --document-heading: #edf3fc;
-  --document-muted: #9aaec6;
-  --document-border: #35465b;
-  --document-soft: #243245;
+  --document-background: var(--shell-panel);
+  --document-text: #d4d4d4;
+  --document-heading: var(--shell-text);
+  --document-muted: var(--shell-muted);
+  --document-border: var(--shell-border);
+  --document-soft: var(--shell-soft);
   --document-accent: #95bfff;
 }
 

@@ -80,6 +80,11 @@ function renderMath() {
   };
 }
 
+/** Sanitized HTML tree of a whole document, as shown in previews. */
+export function markdownTree(markdown: string): Root {
+  return processor.runSync(processor.parse(markdown)) as Root;
+}
+
 export interface PreviewSection {
   id: number;
   start: number;

@@ -1,5 +1,9 @@
-use crate::metadata::{Annotation, AnnotationKind, ProjectData, Term};
-use crate::project::{self, ProjectSession};
+use crate::error::{AppError, AppResult};
+use crate::metadata::{Annotation, AnnotationKind, ProjectData};
+use crate::project::history::HistoryReason;
+use crate::project::{
+    self, ProjectSession, annotations, entries, safe_project_directory, session, tree,
+};
 use axum::{
     Router,
     extract::State,
@@ -23,6 +27,10 @@ use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 const PORT: u16 = 38419;
+
+pub(crate) fn url() -> String {
+    format!("http://127.0.0.1:{PORT}/mcp")
+}
 
 #[derive(Clone)]
 pub struct VivinMcp {
@@ -72,7 +80,7 @@ struct CreateArg {
 #[serde(rename_all = "camelCase")]
 struct AnnotationArg {
     document: String,
-    kind: String,
+    kind: AnnotationKind,
     quote: String,
     offset: usize,
     note: String,
@@ -95,21 +103,48 @@ struct FlagArg {
     path: String,
     value: bool,
 }
-fn result<T: serde::Serialize>(value: Result<T, String>) -> Result<CallToolResult, McpError> {
+
+fn result<T: serde::Serialize>(value: AppResult<T>) -> Result<CallToolResult, McpError> {
     Ok(match value {
         Ok(value) => CallToolResult::success(vec![ContentBlock::text(
             serde_json::to_string(&value).unwrap_or_else(|_| "null".to_string()),
         )]),
-        Err(error) => CallToolResult::error(vec![ContentBlock::text(error)]),
+        Err(error) => CallToolResult::error(vec![ContentBlock::text(
+            serde_json::to_string(&error).unwrap_or(error.message),
+        )]),
     })
 }
 
-fn root(app: &AppHandle) -> Result<PathBuf, String> {
-    app.state::<ProjectSession>().root()
+fn require_no_unsaved_edits(state: &ProjectSession) -> AppResult<()> {
+    if state.has_dirty_draft()? {
+        return Err(AppError::state(
+            "当前项目有未保存的编辑内容，请先在 vivin 中保存或处理后再切换项目",
+        ));
+    }
+    Ok(())
+}
+
+fn require_no_draft_under(state: &ProjectSession, path: &str) -> AppResult<()> {
+    if state.has_draft_under(path)? {
+        return Err(AppError::state("目标包含未保存草稿，请先保存"));
+    }
+    Ok(())
 }
 
 #[tool_router]
 impl VivinMcp {
+    fn new(app: AppHandle) -> Self {
+        Self { app }
+    }
+
+    fn session(&self) -> tauri::State<'_, ProjectSession> {
+        self.app.state::<ProjectSession>()
+    }
+
+    fn changed(&self) {
+        let _ = self.app.emit("vivin://project-changed", ());
+    }
+
     #[tool(
         description = "Create and open a new vivin project in a local parent directory. The new project includes a resources directory."
     )]
@@ -118,42 +153,14 @@ impl VivinMcp {
         Parameters(arg): Parameters<CreateProjectArg>,
     ) -> Result<CallToolResult, McpError> {
         result((|| {
-            let state = self.app.state::<ProjectSession>();
+            let state = self.session();
             let _guard = state.mutation_guard()?;
-            if state.has_dirty_draft()? {
-                return Err("当前项目有未保存的编辑内容，请先保存或处理后再切换项目".to_string());
-            }
-            let parent = fs::canonicalize(&arg.parent).map_err(|error| error.to_string())?;
-            if !parent.is_dir() {
-                return Err("项目父目录不存在".to_string());
-            }
-            let name_path = project::checked_relative(&arg.name)?;
-            if name_path.components().count() != 1 {
-                return Err("项目名称不能包含路径".to_string());
-            }
-            let root = parent.join(name_path);
-            fs::create_dir(&root).map_err(|error| error.to_string())?;
-            let initial = (|| {
-                fs::create_dir(root.join("resources")).map_err(|error| error.to_string())?;
-                let data = ProjectData::load(&root)?;
-                data.save(&root)?;
-                Ok::<(), String>(())
-            })();
-            if let Err(error) = initial {
-                let _ = fs::remove_dir_all(&root);
-                return Err(error);
-            }
-            state.set_root(root.clone())?;
-            let _ = self.app.emit(
-                "vivin://project-opened",
-                json!({ "name": arg.name, "path": root }),
-            );
-            Ok(json!({ "name": arg.name, "path": root }))
+            require_no_unsaved_edits(&state)?;
+            let root = session::create_project_root(&arg.parent, &arg.name)?;
+            let info = state.activate(&self.app, root)?;
+            let _ = self.app.emit("vivin://project-opened", &info);
+            Ok(info)
         })())
-    }
-
-    fn new(app: AppHandle) -> Self {
-        Self { app }
     }
 
     #[tool(
@@ -164,37 +171,19 @@ impl VivinMcp {
         Parameters(arg): Parameters<OpenProjectArg>,
     ) -> Result<CallToolResult, McpError> {
         result((|| {
-            let state = self.app.state::<ProjectSession>();
+            let state = self.session();
             let _guard = state.mutation_guard()?;
-            if state.has_dirty_draft()? {
-                return Err(
-                    "当前项目有未保存的编辑内容，请先在 vivin 中保存或处理后再切换项目".to_string(),
-                );
-            }
-            let root = fs::canonicalize(&arg.path).map_err(|error| error.to_string())?;
-            if !root.is_dir() {
-                return Err("请选择项目目录".to_string());
-            }
-            ProjectData::load(&root)?;
-            let name = root.file_name().map_or_else(
-                || root.to_string_lossy().into_owned(),
-                |name| name.to_string_lossy().into_owned(),
-            );
-            state.set_root(root.clone())?;
-            let _ = self.app.emit(
-                "vivin://project-opened",
-                json!({ "name": name, "path": root }),
-            );
-            Ok(json!({ "name": name, "path": root }))
+            require_no_unsaved_edits(&state)?;
+            let root = session::resolve_project_root(&arg.path)?;
+            let info = state.activate(&self.app, root)?;
+            let _ = self.app.emit("vivin://project-opened", &info);
+            Ok(info)
         })())
     }
 
     #[tool(description = "Get the active vivin project path.")]
     fn project_context(&self) -> Result<CallToolResult, McpError> {
-        result((|| {
-            let root = root(&self.app)?;
-            Ok(json!({ "path": root }))
-        })())
+        result((|| Ok(json!({ "path": self.session().root()? })))())
     }
 
     #[tool(
@@ -202,8 +191,8 @@ impl VivinMcp {
     )]
     fn list_project_tree(&self) -> Result<CallToolResult, McpError> {
         result((|| {
-            let root = root(&self.app)?;
-            project::collect_tree(&root, &root, 0, &ProjectData::load(&root)?)
+            let root = self.session().root()?;
+            tree::collect_tree(&root, &root, 0, &ProjectData::load(&root)?)
         })())
     }
 
@@ -215,51 +204,43 @@ impl VivinMcp {
         Parameters(arg): Parameters<PathArg>,
     ) -> Result<CallToolResult, McpError> {
         result((|| {
-            let state = self.app.state::<ProjectSession>();
+            let state = self.session();
             let root = state.root()?;
-            let file = project::checked_document(&root, &arg.path)?;
-            let disk = fs::read_to_string(file).map_err(|error| error.to_string())?;
-            let content = if let Some(draft) = state.draft(&arg.path)? {
-                if project::revision(&disk) != draft.base_revision {
-                    return Err(
-                        "文档在草稿编辑期间发生外部修改，请先在 vivin 中处理冲突".to_string()
-                    );
-                }
-                draft.content
-            } else {
-                disk
-            };
-            Ok(
-                json!({ "path": arg.path, "revision": project::revision(&content), "content": content, "lockSource": ProjectData::load(&root)?.lock_source(&arg.path) }),
-            )
+            let content = state.current_content(&root, &arg.path)?;
+            Ok(json!({
+                "path": arg.path,
+                "revision": project::revision(&content),
+                "content": content,
+                "lockSource": ProjectData::load(&root)?.lock_source(&arg.path),
+            }))
         })())
     }
 
     #[tool(
-        description = "Replace a Markdown document using its exact expected revision. Locked files are rejected."
+        description = "Replace a Markdown document using its exact expected revision. Locked files are rejected. The previous text is kept in the document's version history."
     )]
     fn write_document(
         &self,
         Parameters(arg): Parameters<WriteArg>,
     ) -> Result<CallToolResult, McpError> {
         result((|| {
-            let state = self.app.state::<ProjectSession>();
+            let state = self.session();
             let _guard = state.mutation_guard()?;
             let root = state.root()?;
             let file = project::checked_document(&root, &arg.path)?;
-            let before_disk = fs::read_to_string(&file).map_err(|error| error.to_string())?;
+            let before_disk = fs::read_to_string(&file)?;
             let draft = state.draft(&arg.path)?;
             let before = if let Some(draft) = &draft {
                 if project::revision(&before_disk) != draft.base_revision {
-                    return Err("磁盘文档已改变，请先处理外部修改冲突".to_string());
+                    return Err(AppError::conflict("磁盘文档已改变，请先处理外部修改冲突"));
                 }
                 if project::revision(&draft.content) != arg.expected_revision {
-                    return Err("版本冲突：用户草稿已在读取后继续修改".to_string());
+                    return Err(AppError::conflict("版本冲突：用户草稿已在读取后继续修改"));
                 }
                 draft.content.clone()
             } else {
                 if project::revision(&before_disk) != arg.expected_revision {
-                    return Err("版本冲突：文档已在读取后修改".to_string());
+                    return Err(AppError::conflict("版本冲突：文档已在读取后修改"));
                 }
                 before_disk.clone()
             };
@@ -270,6 +251,7 @@ impl VivinMcp {
                 arg.path.clone(),
                 arg.content.clone(),
                 expected_disk_revision,
+                Some(HistoryReason::Ai),
             )?;
             state.remove_draft(&arg.path)?;
             let _ = self.app.emit(
@@ -288,43 +270,10 @@ impl VivinMcp {
         Parameters(arg): Parameters<CreateArg>,
     ) -> Result<CallToolResult, McpError> {
         result((|| {
-            let state = self.app.state::<ProjectSession>();
+            let state = self.session();
             let _guard = state.mutation_guard()?;
-            let root = state.root()?;
-            let parent = if arg.directory.is_empty() {
-                root.clone()
-            } else {
-                project::checked_member(&root, &arg.directory)?
-            };
-            if !parent.is_dir() {
-                return Err("目标目录不存在".to_string());
-            }
-            let name = project::checked_relative(&arg.name)?;
-            if name.components().count() != 1
-                || !name
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
-            {
-                return Err("文档名称必须以 .md 结尾且不能包含路径".to_string());
-            }
-            let path = if arg.directory.is_empty() {
-                arg.name.clone()
-            } else {
-                format!("{}/{}", arg.directory, arg.name)
-            };
-            ProjectData::load(&root)?.require_unlocked(&path)?;
-            let file = parent.join(name);
-            fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&file)
-                .map_err(|error| error.to_string())?;
-            let document = project::Document {
-                path,
-                content: String::new(),
-                revision: project::revision(""),
-            };
-            let _ = self.app.emit("vivin://project-changed", ());
+            let document = entries::create_document_in(&state.root()?, &arg.directory, &arg.name)?;
+            self.changed();
             Ok(document)
         })())
     }
@@ -335,30 +284,10 @@ impl VivinMcp {
         Parameters(arg): Parameters<CreateArg>,
     ) -> Result<CallToolResult, McpError> {
         result((|| {
-            let state = self.app.state::<ProjectSession>();
+            let state = self.session();
             let _guard = state.mutation_guard()?;
-            let root = state.root()?;
-            let parent = if arg.directory.is_empty() {
-                root.clone()
-            } else {
-                project::checked_member(&root, &arg.directory)?
-            };
-            if !parent.is_dir() {
-                return Err("目标目录不存在".to_string());
-            }
-            let name = project::checked_relative(&arg.name)?;
-            if name.components().count() != 1 {
-                return Err("目录名称不能包含路径".to_string());
-            }
-            let path = if arg.directory.is_empty() {
-                arg.name.clone()
-            } else {
-                format!("{}/{}", arg.directory, arg.name)
-            };
-            ProjectData::load(&root)?.require_unlocked(&path)?;
-            let absolute = parent.join(name);
-            fs::create_dir(&absolute).map_err(|error| error.to_string())?;
-            let _ = self.app.emit("vivin://project-changed", ());
+            let path = entries::create_directory_in(&state.root()?, &arg.directory, &arg.name)?;
+            self.changed();
             Ok(json!({ "path": path }))
         })())
     }
@@ -368,74 +297,40 @@ impl VivinMcp {
     )]
     fn move_entry(&self, Parameters(arg): Parameters<MoveArg>) -> Result<CallToolResult, McpError> {
         result((|| {
-            let state = self.app.state::<ProjectSession>();
+            let state = self.session();
             let _guard = state.mutation_guard()?;
-            let root = state.root()?;
-            let source = project::checked_member(&root, &arg.path)?;
-            if state.has_draft_under(&arg.path)? {
-                return Err("目标包含未保存草稿，请先保存".to_string());
-            }
-            let destination_dir = if arg.destination_directory.is_empty() {
-                root.clone()
-            } else {
-                project::checked_member(&root, &arg.destination_directory)?
-            };
-            if !destination_dir.is_dir() || destination_dir.starts_with(&source) {
-                return Err("目标目录无效或位于源目录内".to_string());
-            }
-            let name = project::checked_relative(&arg.name)?;
-            if name.components().count() != 1 || (source.is_file() && !arg.name.ends_with(".md")) {
-                return Err("目标名称无效".to_string());
-            }
-            let target = destination_dir.join(name);
-            if target.exists() {
-                return Err("目标路径已存在".to_string());
-            }
-            let new_path = if arg.destination_directory.is_empty() {
-                arg.name.clone()
-            } else {
-                format!("{}/{}", arg.destination_directory, arg.name)
-            };
-            let mut data = ProjectData::load(&root)?;
-            data.require_unlocked(&arg.path)?;
-            data.require_unlocked(&new_path)?;
-            if data
-                .locked
-                .iter()
-                .any(|locked| locked.starts_with(&format!("{}/", arg.path)))
-            {
-                return Err("目录内有独立锁定内容，请先解锁".to_string());
-            }
-            data.remap_paths(&arg.path, &new_path);
-            fs::rename(&source, &target).map_err(|error| error.to_string())?;
-            if let Err(error) = data.save(&root) {
-                let _ = fs::rename(&target, &source);
-                return Err(error);
-            }
+            require_no_draft_under(&state, &arg.path)?;
+            let new_path = entries::move_entry_in(
+                &state.root()?,
+                &arg.path,
+                &arg.destination_directory,
+                &arg.name,
+            )?;
             let _ = self.app.emit(
                 "vivin://entry-moved",
                 json!({ "from": arg.path, "to": new_path }),
             );
-            let _ = self.app.emit("vivin://project-changed", ());
+            self.changed();
             Ok(json!({ "path": new_path }))
         })())
     }
 
-    #[tool(description = "Delete a Markdown document or directory within the active project.")]
+    #[tool(
+        description = "Move a Markdown document or directory within the active project to the system trash."
+    )]
     fn delete_entry(
         &self,
         Parameters(arg): Parameters<DeleteEntryArg>,
     ) -> Result<CallToolResult, McpError> {
         result((|| {
-            let state = self.app.state::<ProjectSession>();
-            if state.has_draft_under(&arg.path)? {
-                return Err("目标包含未保存草稿，请先保存".to_string());
-            }
-            project::delete_entry(arg.path.clone(), state)?;
+            let state = self.session();
+            let _guard = state.mutation_guard()?;
+            require_no_draft_under(&state, &arg.path)?;
+            entries::delete_entry_in(&state.root()?, &arg.path, false)?;
             let _ = self
                 .app
                 .emit("vivin://entry-deleted", json!({ "path": arg.path }));
-            let _ = self.app.emit("vivin://project-changed", ());
+            self.changed();
             Ok(json!({ "deleted": arg.path }))
         })())
     }
@@ -445,12 +340,12 @@ impl VivinMcp {
     )]
     fn list_resources(&self) -> Result<CallToolResult, McpError> {
         result((|| {
-            let root = root(&self.app)?;
-            let dir = project::safe_project_directory(&root, "resources", false)?;
+            let root = self.session().root()?;
+            let dir = safe_project_directory(&root, "resources", false)?;
             if !dir.exists() {
                 return Ok(json!([]));
             }
-            let nodes = project::collect_resources(&root, &dir, 0)?;
+            let nodes = tree::collect_resources(&root, &dir, 0)?;
             Ok(json!({ "projectRoot": root, "resources": nodes }))
         })())
     }
@@ -459,7 +354,7 @@ impl VivinMcp {
         description = "List current project data, including terms, annotations, pins and locks."
     )]
     fn project_data(&self) -> Result<CallToolResult, McpError> {
-        result((|| ProjectData::load(&root(&self.app)?))())
+        result((|| ProjectData::load(&self.session().root()?))())
     }
 
     #[tool(
@@ -470,57 +365,24 @@ impl VivinMcp {
         Parameters(arg): Parameters<AnnotationArg>,
     ) -> Result<CallToolResult, McpError> {
         result((|| {
-            let state = self.app.state::<ProjectSession>();
+            let state = self.session();
             let _guard = state.mutation_guard()?;
             let root = state.root()?;
-            let file = project::checked_document(&root, &arg.document)?;
-            let disk = fs::read_to_string(file).map_err(|error| error.to_string())?;
-            let content = if let Some(draft) = state.draft(&arg.document)? {
-                if project::revision(&disk) != draft.base_revision {
-                    return Err("文档发生外部修改，请先处理冲突".to_string());
-                }
-                draft.content
-            } else {
-                disk
-            };
-            let end_offset = arg
-                .offset
-                .checked_add(arg.quote.encode_utf16().count())
-                .ok_or("标注位置无效")?;
-            let start = project::utf16_to_byte(&content, arg.offset).ok_or("标注位置无效")?;
-            let end = project::utf16_to_byte(&content, end_offset).ok_or("标注位置无效")?;
-            if arg.quote.is_empty() || content.get(start..end) != Some(arg.quote.as_str()) {
-                return Err("标注位置与当前原文不匹配".to_string());
-            }
-            let kind = match arg.kind.as_str() {
-                "todo" => AnnotationKind::Todo,
-                "comment" => AnnotationKind::Comment,
-                "question" => AnnotationKind::Question,
-                "error" => AnnotationKind::Error,
-                _ => return Err("标注类型无效".to_string()),
-            };
-            let mut data = ProjectData::load(&root)?;
-            data.require_unlocked(&arg.document)?;
-            let annotation = Annotation {
-                id: Uuid::new_v4().to_string(),
-                document: arg.document.clone(),
-                kind,
-                quote: arg.quote,
-                offset: arg.offset,
-                note: arg.note,
-                context_before: content[..start]
-                    .chars()
-                    .rev()
-                    .take(32)
-                    .collect::<String>()
-                    .chars()
-                    .rev()
-                    .collect(),
-                context_after: content[end..].chars().take(32).collect(),
-            };
-            data.annotations.push(annotation.clone());
-            data.save(&root)?;
-            let _ = self.app.emit("vivin://project-changed", ());
+            let annotation = annotations::upsert_annotation_in(
+                &state,
+                &root,
+                Annotation {
+                    id: String::new(),
+                    document: arg.document,
+                    kind: arg.kind,
+                    quote: arg.quote,
+                    context_before: String::new(),
+                    context_after: String::new(),
+                    offset: arg.offset,
+                    note: arg.note,
+                },
+            )?;
+            self.changed();
             Ok(annotation)
         })())
     }
@@ -531,19 +393,10 @@ impl VivinMcp {
         Parameters(arg): Parameters<IdArg>,
     ) -> Result<CallToolResult, McpError> {
         result((|| {
-            let state = self.app.state::<ProjectSession>();
+            let state = self.session();
             let _guard = state.mutation_guard()?;
-            let root = state.root()?;
-            let mut data = ProjectData::load(&root)?;
-            let annotation = data
-                .annotations
-                .iter()
-                .find(|item| item.id == arg.id)
-                .ok_or("标注不存在")?;
-            data.require_unlocked(&annotation.document)?;
-            data.annotations.retain(|item| item.id != arg.id);
-            data.save(&root)?;
-            let _ = self.app.emit("vivin://project-changed", ());
+            annotations::delete_annotation_in(&state.root()?, &arg.id)?;
+            self.changed();
             Ok(json!({ "deleted": arg.id }))
         })())
     }
@@ -554,33 +407,11 @@ impl VivinMcp {
         Parameters(arg): Parameters<TermArg>,
     ) -> Result<CallToolResult, McpError> {
         result((|| {
-            let state = self.app.state::<ProjectSession>();
+            let state = self.session();
             let _guard = state.mutation_guard()?;
-            let root = state.root()?;
-            let mut data = ProjectData::load(&root)?;
-            let name = arg.name.trim();
-            if name.is_empty() {
-                return Err("术语名称不能为空".to_string());
-            }
-            if data
-                .terms
-                .iter()
-                .any(|item| item.name == name && Some(&item.id) != arg.id.as_ref())
-            {
-                return Err("术语名称已存在".to_string());
-            }
-            let term = Term {
-                id: arg.id.unwrap_or_else(|| Uuid::new_v4().to_string()),
-                name: name.to_string(),
-                definition: arg.definition,
-            };
-            if let Some(existing) = data.terms.iter_mut().find(|item| item.id == term.id) {
-                *existing = term.clone();
-            } else {
-                data.terms.push(term.clone());
-            }
-            data.save(&root)?;
-            let _ = self.app.emit("vivin://project-changed", ());
+            let term =
+                annotations::upsert_term_in(&state.root()?, arg.id, &arg.name, arg.definition)?;
+            self.changed();
             Ok(term)
         })())
     }
@@ -588,18 +419,10 @@ impl VivinMcp {
     #[tool(description = "Delete a shared project term by ID.")]
     fn delete_term(&self, Parameters(arg): Parameters<IdArg>) -> Result<CallToolResult, McpError> {
         result((|| {
-            let state = self.app.state::<ProjectSession>();
+            let state = self.session();
             let _guard = state.mutation_guard()?;
-            let root = state.root()?;
-            let mut data = ProjectData::load(&root)?;
-            if !data.terms.iter().any(|term| term.id == arg.id) {
-                return Err("术语不存在".to_string());
-            }
-            data.terms.retain(|term| term.id != arg.id);
-            data.term_exceptions
-                .retain(|exception| exception.term_id != arg.id);
-            data.save(&root)?;
-            let _ = self.app.emit("vivin://project-changed", ());
+            annotations::delete_term_in(&state.root()?, &arg.id)?;
+            self.changed();
             Ok(json!({ "deleted": arg.id }))
         })())
     }
@@ -607,19 +430,10 @@ impl VivinMcp {
     #[tool(description = "Pin or unpin a Markdown document.")]
     fn set_pinned(&self, Parameters(arg): Parameters<FlagArg>) -> Result<CallToolResult, McpError> {
         result((|| {
-            let state = self.app.state::<ProjectSession>();
+            let state = self.session();
             let _guard = state.mutation_guard()?;
-            let root = state.root()?;
-            project::checked_document(&root, &arg.path)?;
-            let mut data = ProjectData::load(&root)?;
-            data.require_unlocked(&arg.path)?;
-            if arg.value {
-                data.pinned.insert(arg.path.clone());
-            } else {
-                data.pinned.remove(&arg.path);
-            }
-            data.save(&root)?;
-            let _ = self.app.emit("vivin://project-changed", ());
+            entries::set_pinned_in(&state.root()?, &arg.path, arg.value)?;
+            self.changed();
             Ok(json!({ "path": arg.path, "pinned": arg.value }))
         })())
     }
@@ -629,25 +443,10 @@ impl VivinMcp {
     )]
     fn set_locked(&self, Parameters(arg): Parameters<FlagArg>) -> Result<CallToolResult, McpError> {
         result((|| {
-            let state = self.app.state::<ProjectSession>();
+            let state = self.session();
             let _guard = state.mutation_guard()?;
-            let root = state.root()?;
-            project::checked_member(&root, &arg.path)?;
-            let mut data = ProjectData::load(&root)?;
-            if !arg.value
-                && data
-                    .lock_source(&arg.path)
-                    .is_some_and(|source| source != arg.path)
-            {
-                return Err("请先解锁上级目录".to_string());
-            }
-            if arg.value {
-                data.locked.insert(arg.path.clone());
-            } else {
-                data.locked.remove(&arg.path);
-            }
-            data.save(&root)?;
-            let _ = self.app.emit("vivin://project-changed", ());
+            entries::set_locked_in(&state.root()?, &arg.path, arg.value)?;
+            self.changed();
             Ok(json!({ "path": arg.path, "locked": arg.value }))
         })())
     }
@@ -658,7 +457,7 @@ impl ServerHandler for VivinMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::from_build_env())
-            .with_instructions("The active vivin project is selected in the desktop app. All paths are relative to that project. Writes follow project lock and document version checks.".to_string())
+            .with_instructions("The active vivin project is selected in the desktop app. All paths are relative to that project. Writes follow project lock and document version checks. Errors are JSON objects with a stable `code` and a Chinese `message`.".to_string())
     }
 }
 
@@ -693,6 +492,33 @@ async fn auth(
     Ok(next.run(request).await)
 }
 
+fn bridge_token(path: &PathBuf) -> Result<String, String> {
+    if path.exists() {
+        return serde_json::from_slice::<serde_json::Value>(
+            &fs::read(path).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?
+        .get("token")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| "桥接配置缺少令牌".to_string());
+    }
+    let token = format!("{}{}", Uuid::new_v4(), Uuid::new_v4());
+    fs::write(
+        path,
+        serde_json::to_vec_pretty(&json!({ "url": url(), "token": token }))
+            .map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(token)
+}
+
 pub fn start(app: AppHandle) -> Result<(), String> {
     let directory = app
         .path()
@@ -705,34 +531,7 @@ pub fn start(app: AppHandle) -> Result<(), String> {
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
             .map_err(|error| error.to_string())?;
     }
-    let path = directory.join("bridge.json");
-    let token = if path.exists() {
-        serde_json::from_slice::<serde_json::Value>(
-            &fs::read(&path).map_err(|error| error.to_string())?,
-        )
-        .map_err(|error| error.to_string())?
-        .get("token")
-        .and_then(|value| value.as_str())
-        .ok_or("桥接配置缺少令牌")?
-        .to_string()
-    } else {
-        let token = format!("{}{}", Uuid::new_v4(), Uuid::new_v4());
-        fs::write(
-            &path,
-            serde_json::to_vec_pretty(
-                &json!({ "url": format!("http://127.0.0.1:{PORT}/mcp"), "token": token }),
-            )
-            .map_err(|error| error.to_string())?,
-        )
-        .map_err(|error| error.to_string())?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-                .map_err(|error| error.to_string())?;
-        }
-        token
-    };
+    let token = bridge_token(&directory.join("bridge.json"))?;
     tauri::async_runtime::spawn(async move {
         let shared_app = app.clone();
         let service = StreamableHttpService::new(
@@ -748,10 +547,10 @@ pub fn start(app: AppHandle) -> Result<(), String> {
         match tokio::net::TcpListener::bind(("127.0.0.1", PORT)).await {
             Ok(listener) => {
                 if let Err(error) = axum::serve(listener, router).await {
-                    eprintln!("vivin MCP server: {error}");
+                    log::error!("vivin MCP server: {error}");
                 }
             }
-            Err(error) => eprintln!("vivin MCP server cannot bind: {error}"),
+            Err(error) => log::error!("vivin MCP server cannot bind: {error}"),
         }
     });
     Ok(())

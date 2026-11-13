@@ -38,5 +38,14 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc3RDU4NDk3MUFBRDgyRUUKUldUdWdxMGFsNFRWZDhISzJRZTVveWF5ME1wSC9UYUxWOXFQdjl2blRtWGRvNkE5ZkVMUGlXcFkK",
+      "endpoints": ["https://github.com/hopeful-adrian/vivin/releases/latest/download/latest.json"],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

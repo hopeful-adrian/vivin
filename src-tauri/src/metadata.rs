@@ -1,3 +1,4 @@
+use crate::error::{AppError, AppResult};
 use crate::project::safe_project_directory;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -22,7 +23,7 @@ pub struct ProjectData {
     pub annotations: Vec<Annotation>,
 }
 
-#[derive(Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Term {
     pub id: String,
@@ -30,7 +31,7 @@ pub struct Term {
     pub definition: String,
 }
 
-#[derive(Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TermException {
     pub id: String,
@@ -41,7 +42,7 @@ pub struct TermException {
     pub context_after: String,
 }
 
-#[derive(Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Annotation {
     pub id: String,
@@ -54,7 +55,7 @@ pub struct Annotation {
     pub note: String,
 }
 
-#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum AnnotationKind {
     Todo,
@@ -68,7 +69,7 @@ fn schema_version() -> u32 {
 }
 
 impl ProjectData {
-    pub fn load(root: &Path) -> Result<Self, String> {
+    pub fn load(root: &Path) -> AppResult<Self> {
         let path = safe_project_directory(root, ".vivin", false)?.join("project.json");
         if !path.exists() {
             return Ok(Self {
@@ -76,29 +77,24 @@ impl ProjectData {
                 ..Self::default()
             });
         }
-        let bytes = fs::read(path).map_err(|error| error.to_string())?;
-        let data: Self = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+        let bytes = fs::read(path)?;
+        let data: Self = serde_json::from_slice(&bytes)?;
         if data.schema_version != schema_version() {
-            return Err(format!("不支持的项目数据版本：{}", data.schema_version));
+            return Err(AppError::unsupported(format!(
+                "不支持的项目数据版本：{}",
+                data.schema_version
+            )));
         }
         Ok(data)
     }
 
-    pub fn save(&self, root: &Path) -> Result<(), String> {
+    pub fn save(&self, root: &Path) -> AppResult<()> {
         let directory = safe_project_directory(root, ".vivin", true)?;
-        let mut temporary =
-            tempfile::NamedTempFile::new_in(&directory).map_err(|error| error.to_string())?;
-        serde_json::to_writer_pretty(&mut temporary, self).map_err(|error| error.to_string())?;
-        temporary
-            .write_all(b"\n")
-            .map_err(|error| error.to_string())?;
-        temporary
-            .as_file()
-            .sync_all()
-            .map_err(|error| error.to_string())?;
-        temporary
-            .persist(directory.join("project.json"))
-            .map_err(|error| error.to_string())?;
+        let mut temporary = tempfile::NamedTempFile::new_in(&directory)?;
+        serde_json::to_writer_pretty(&mut temporary, self)?;
+        temporary.write_all(b"\n")?;
+        temporary.as_file().sync_all()?;
+        temporary.persist(directory.join("project.json"))?;
         Ok(())
     }
 
@@ -115,9 +111,18 @@ impl ProjectData {
         }
     }
 
-    pub fn require_unlocked(&self, path: &str) -> Result<(), String> {
+    pub fn require_unlocked(&self, path: &str) -> AppResult<()> {
         if let Some(source) = self.lock_source(path) {
-            return Err(format!("已由 {source} 锁定，无法修改"));
+            return Err(AppError::locked(format!("已由 {source} 锁定，无法修改")));
+        }
+        Ok(())
+    }
+
+    /// Rejects moving or deleting a directory that contains its own locked entries.
+    pub fn require_no_locked_descendants(&self, path: &str) -> AppResult<()> {
+        let prefix = format!("{path}/");
+        if self.locked.iter().any(|locked| locked.starts_with(&prefix)) {
+            return Err(AppError::locked("目录内有独立锁定的内容，请先解锁"));
         }
         Ok(())
     }

@@ -5,8 +5,14 @@ import { mockIPC, mockWindows } from '@tauri-apps/api/mocks';
 window.isTauri = true;
 if (!new URLSearchParams(location.search).has('restore'))
   localStorage.setItem('vivin.last-project', JSON.stringify('/fixture'));
-localStorage.setItem('vivin.locale', JSON.stringify('zh'));
-localStorage.setItem('vivin.theme', JSON.stringify('light'));
+const params = new URLSearchParams(location.search);
+localStorage.setItem('vivin.locale', JSON.stringify(params.get('locale') ?? 'zh'));
+localStorage.setItem('vivin.theme', JSON.stringify(params.get('theme') ?? 'light'));
+localStorage.setItem(
+  'vivin.document-theme',
+  JSON.stringify(params.get('documentTheme') ?? 'frame'),
+);
+localStorage.setItem('vivin.check-updates', 'false');
 localStorage.setItem('vivin.auto-format', 'false');
 const quote = '批注锚点';
 const markdown = `# 编辑器验收\n\n${quote} 和普通正文。\n\n## 第二节\n\n可以直接编辑 **粗体** 和列表。\n\n- 第一项\n- 第二项\n\n`;
@@ -81,6 +87,7 @@ let data = {
   ],
 };
 const saved = new Map();
+const history = new Map();
 let revision = 1;
 const result = document.getElementById('result');
 const report = (message) => {
@@ -133,12 +140,67 @@ mockIPC(
     if (command === 'read_document' || command === 'reload_document')
       return { path: args.path, content: documents[args.path], revision: String(revision) };
     if (command === 'read_document_revision') return String(revision);
+    if (command === 'read_document_revisions')
+      return Object.fromEntries(
+        args.paths.map((path) => [path, path in documents ? String(revision) : null]),
+      );
     if (command === 'save_document') {
-      if (args.expectedRevision !== String(revision)) throw new Error('文档已被其他操作修改');
+      if (args.expectedRevision !== String(revision))
+        throw { code: 'revision_conflict', message: '文档已被其他操作修改' };
+      const entries = history.get(args.path) ?? [];
+      entries.unshift({
+        id: `v${entries.length + 1}`,
+        createdAt: Date.now(),
+        size: documents[args.path]?.length ?? 0,
+        reason: args.snapshot ?? 'save',
+        revision: String(revision),
+        content: documents[args.path] ?? '',
+      });
+      history.set(args.path, entries);
       documents[args.path] = args.content;
       saved.set(args.path, args.content);
       return { path: args.path, content: args.content, revision: String(revision) };
     }
+    if (command === 'save_conflict_copy') {
+      const path = args.path.replace(/\.md$/, ` (${args.label}).md`);
+      documents[path] = args.content;
+      return { path, content: args.content, revision: String(revision) };
+    }
+    if (command === 'create_document') {
+      const path = args.directory ? `${args.directory}/${args.name}` : args.name;
+      documents[path] = '';
+      return { path, content: '', revision: String(revision) };
+    }
+    if (command === 'move_entry') {
+      const path = args.destinationDirectory
+        ? `${args.destinationDirectory}/${args.name}`
+        : args.name;
+      documents[path] = documents[args.path];
+      delete documents[args.path];
+      return path;
+    }
+    if (command === 'delete_entry') {
+      delete documents[args.path];
+      return;
+    }
+    if (command === 'list_document_history')
+      return (history.get(args.path) ?? []).map(({ content: _content, ...entry }) => entry);
+    if (command === 'read_document_history')
+      return history.get(args.path)?.find((entry) => entry.id === args.id)?.content ?? '';
+    if (command === 'export_html') return `/fixture/${args.suggestedName}`;
+    if (command === 'bridge_info')
+      return { url: 'http://127.0.0.1:47321/mcp', configPath: '~/.vivin/bridge.json' };
+    if (command === 'plugin:app|version') return '0.1.0';
+    if (command === 'plugin:updater|check')
+      return params.has('update')
+        ? { rid: 1, currentVersion: '0.1.0', version: '0.2.0', rawJson: {} }
+        : null;
+    if (
+      command === 'print_document' ||
+      command === 'open_log_directory' ||
+      command === 'open_release_page'
+    )
+      return;
     if (command === 'upsert_annotation') {
       data.annotations = data.annotations.map((item) =>
         item.id === args.annotation.id ? args.annotation : item,
