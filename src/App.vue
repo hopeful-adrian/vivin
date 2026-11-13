@@ -40,6 +40,7 @@ import {
   watch,
 } from 'vue';
 import AppTitlebar from './components/app-titlebar.vue';
+import AppTooltip from './components/app-tooltip.vue';
 import EmptyPanel from './components/empty-panel.vue';
 import LoadingState from './components/loading-state.vue';
 import DocumentFind from './components/document-find.vue';
@@ -47,6 +48,7 @@ import type { SearchRange } from './lib/document-search';
 import MarkdownOutlinePanel from './components/markdown-outline-panel.vue';
 import { annotationMarks, resolveAnnotation } from './lib/annotation-anchor';
 import { createTextMatcher } from './lib/text-matcher';
+import { parseRecentProjects, rememberRecentProject } from './lib/recent-projects';
 import { formatDocument } from './lib/format-document';
 import { documentThemes, type DocumentTheme } from './lib/editor-theme';
 import {
@@ -235,6 +237,13 @@ const context = ref<TreeNode | null>(null);
 const contextAt = ref({ x: 0, y: 0 });
 const more = ref(false);
 const projectMenu = ref(false);
+const projectSwitcher = ref(false);
+const recentProjects = ref(
+  parseRecentProjects(readPreference<unknown>('vivin.recent-projects', [])),
+);
+watch(recentProjects, (value) =>
+  localStorage.setItem('vivin.recent-projects', JSON.stringify(value)),
+);
 const locale = ref<'zh' | 'en'>(
   readPreference<string>('vivin.locale', 'zh') === 'en' ? 'en' : 'zh',
 );
@@ -451,10 +460,12 @@ function clearMarkTimers() {
   markContents.value = {};
 }
 
-async function switchProject(create: boolean) {
+async function switchProject(create: boolean, path?: string) {
   flushEditors();
   if (busy.value) return;
   projectMenu.value = false;
+  projectSwitcher.value = false;
+  if (path && path === project.value?.path) return;
   if (!nativeAvailable()) {
     message.value = translate(
       '请在桌面窗口中使用项目功能',
@@ -477,7 +488,9 @@ async function switchProject(create: boolean) {
   try {
     const next = create
       ? await createProject(name ?? '', locale.value)
-      : await chooseProject(locale.value);
+      : path
+        ? await openProject(path)
+        : await chooseProject(locale.value);
     if (!next) return;
     activateProject(next);
     await refresh();
@@ -497,6 +510,7 @@ function activateProject(next: ProjectInfo) {
   sourceRevealRequests.value = [];
   project.value = next;
   localStorage.setItem('vivin.last-project', JSON.stringify(next.path));
+  recentProjects.value = rememberRecentProject(recentProjects.value, next);
   tree.value = [];
   resources.value = [];
   data.value = emptyData();
@@ -518,8 +532,8 @@ function activateProject(next: ProjectInfo) {
   searching.value = false;
 }
 async function restoreLastProject() {
-  const path = readPreference<string>('vivin.last-project', '');
-  if (!path || project.value) return;
+  const path = readPreference<unknown>('vivin.last-project', '');
+  if (typeof path !== 'string' || !path || project.value) return;
   busy.value = true;
   try {
     const next = await openProject(path);
@@ -1586,6 +1600,7 @@ function shortcut(event: KeyboardEvent) {
     context.value = null;
     more.value = false;
     projectMenu.value = false;
+    projectSwitcher.value = false;
     for (const pane of panes.value) pane.outlineOpen = false;
   }
 }
@@ -1733,6 +1748,7 @@ onBeforeUnmount(() => {
     @click="
       context = null;
       projectMenu = false;
+      projectSwitcher = false;
       more = false;
     "
   >
@@ -1754,14 +1770,85 @@ onBeforeUnmount(() => {
       <div class="relative flex min-w-0 items-center gap-2">
         <button
           class="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-sm font-semibold hover:bg-slate-200/70 disabled:opacity-50"
-          :title="project?.path"
+          :title="translate('切换项目', 'Switch project')"
           :aria-label="translate('切换项目', 'Switch project')"
+          aria-haspopup="menu"
+          :aria-expanded="projectSwitcher"
           :disabled="busy"
-          @click.stop="switchProject(false)"
+          @click.stop="
+            projectSwitcher = !projectSwitcher;
+            projectMenu = false;
+            more = false;
+          "
         >
           <span class="truncate">{{ project?.name || 'vivin' }}</span>
           <ChevronDown :size="14" class="shrink-0 text-slate-500" />
         </button>
+        <div
+          v-if="projectSwitcher"
+          class="absolute left-0 top-9 z-50 w-80 max-w-[calc(100vw-32px)] rounded-xl bg-white p-1 text-sm shadow-lg"
+          role="menu"
+          :aria-label="translate('最近项目', 'Recent projects')"
+          @click.stop
+        >
+          <p class="px-3 py-2 text-xs font-medium text-slate-500">
+            {{ translate('最近项目', 'Recent projects') }}
+          </p>
+          <div class="max-h-72 overflow-y-auto">
+            <p v-if="!recentProjects.length" class="px-3 py-3 text-xs text-slate-400">
+              {{
+                translate(
+                  '打开的项目会自动保存在这里',
+                  'Opened projects will appear here automatically',
+                )
+              }}
+            </p>
+            <div
+              v-for="recent in recentProjects"
+              :key="recent.path"
+              class="group flex items-center"
+            >
+              <button
+                class="min-w-0 flex-1 rounded-lg px-3 py-2 text-left hover:bg-slate-100 disabled:opacity-50"
+                :class="recent.path === project?.path ? 'text-blue-700' : ''"
+                :aria-current="recent.path === project?.path ? 'true' : undefined"
+                :title="recent.path"
+                :disabled="busy"
+                role="menuitem"
+                @click.stop="switchProject(false, recent.path)"
+              >
+                <span class="block truncate font-medium">{{ recent.name }}</span>
+                <span class="block truncate text-[11px] text-slate-400">{{ recent.path }}</span>
+              </button>
+              <button
+                class="mr-1 shrink-0 rounded p-1.5 text-slate-400 hover:bg-slate-100"
+                :aria-label="translate('从最近项目中移除', 'Remove from recent projects')"
+                role="menuitem"
+                @click.stop="
+                  recentProjects = recentProjects.filter((item) => item.path !== recent.path)
+                "
+              >
+                <X :size="14" />
+              </button>
+            </div>
+          </div>
+          <div class="mt-1 border-t border-slate-100 pt-1">
+            <button
+              class="block w-full rounded-lg px-3 py-2 text-left hover:bg-slate-100"
+              role="menuitem"
+              @click.stop="switchProject(false)"
+            >
+              {{ translate('打开项目文件夹…', 'Open project folder…') }}
+            </button>
+            <button
+              class="block w-full rounded-lg px-3 py-2 text-left hover:bg-slate-100"
+              role="menuitem"
+              @click.stop="switchProject(true)"
+            >
+              {{ translate('新建项目…', 'New project…') }}
+            </button>
+          </div>
+        </div>
         <LoaderCircle
           v-if="busy || refreshing"
           :size="15"
@@ -1777,6 +1864,7 @@ onBeforeUnmount(() => {
             class="rounded-md p-1 text-slate-600 hover:bg-slate-200/70"
             @click.stop="
               projectMenu = !projectMenu;
+              projectSwitcher = false;
               more = false;
             "
           >
@@ -1883,6 +1971,7 @@ onBeforeUnmount(() => {
               @click.stop="
                 more = !more;
                 projectMenu = false;
+                projectSwitcher = false;
               "
             >
               <MoreHorizontal :size="18" />
@@ -2420,10 +2509,6 @@ onBeforeUnmount(() => {
                               background: kinds.find((kind) => kind.value === mark.kind)?.color,
                             }"
                           />
-                          <span
-                            class="pointer-events-none absolute right-7 top-1/2 z-30 w-max max-w-56 -translate-y-1/2 break-words whitespace-normal rounded-lg bg-slate-900 px-2.5 py-1.5 text-left text-xs leading-5 text-white opacity-0 shadow-lg group-hover:opacity-100 group-focus-visible:opacity-100"
-                            >{{ mark.quote }}</span
-                          >
                         </button>
                       </div>
                     </div>
@@ -2968,5 +3053,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+    <AppTooltip :locale="locale" />
   </div>
 </template>

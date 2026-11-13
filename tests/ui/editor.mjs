@@ -3,7 +3,8 @@ import { mockIPC, mockWindows } from '@tauri-apps/api/mocks';
 // Isolated in-memory native boundary for repeatable UI regression checks.
 // No user files or credentials are read; all changes disappear on reload.
 window.isTauri = true;
-localStorage.setItem('vivin.last-project', JSON.stringify('/fixture'));
+if (!new URLSearchParams(location.search).has('restore'))
+  localStorage.setItem('vivin.last-project', JSON.stringify('/fixture'));
 localStorage.setItem('vivin.locale', JSON.stringify('zh'));
 localStorage.setItem('vivin.theme', JSON.stringify('light'));
 localStorage.setItem('vivin.auto-format', 'false');
@@ -17,6 +18,10 @@ const originals = {
       (_, i) => `## 第 ${i + 3} 节\n\n段落内容，用于滚动位置回归。\n\n`,
     ).join(''),
   '锁定.md': '# 锁定文件\n\n锁定正文 cat cat。\n',
+  '术语匹配.md':
+    Array.from({ length: 6 }, (_, index) => `${'#'.repeat(index + 1)} 采购计划\n\n`).join('') +
+    '采购计划\n========\n\n采购计划\n--------\n\n> # 采购计划\n\n正文中的采购计划应显示解释，**采购计划**也应匹配。\n\n' +
+    '| 采购计划 | 状态 |\n| --- | --- |\n| 采购计划 | 草稿 |\n',
   '定位回归.md':
     '[重复](重复)\n\n重复\n\n跨段\n\n锚点\n\n```mermaid\nflowchart LR\n  A[开始] --> B[结束]\n```\n',
   '特殊语法.md':
@@ -33,7 +38,7 @@ let data = {
   schemaVersion: 1,
   pinned: [],
   locked: ['锁定.md'],
-  terms: [],
+  terms: [{ id: 'procurement', name: '采购计划', definition: '项目采购计划术语解释。' }],
   termExceptions: [],
   annotations: [
     {

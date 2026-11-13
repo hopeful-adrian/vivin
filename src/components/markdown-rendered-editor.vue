@@ -353,6 +353,7 @@ const annotationPlugin = $prose(() => {
     }
     for (const mark of props.terms ?? []) {
       for (const range of renderedRanges(mapping, mark.offset, mark.quote.length)) {
+        if (state.doc.resolve(range.from).parent.type.name === 'heading') continue;
         decorations.push(
           Decoration.inline(range.from, range.to, {
             class: 'vivin-term',

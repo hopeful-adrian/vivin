@@ -17,6 +17,22 @@ body,
   -webkit-font-smoothing: antialiased;
 }
 
+button:not(:disabled),
+[role='button']:not([aria-disabled='true']),
+a[href],
+select:not(:disabled),
+label:has(input[type='checkbox']:not(:disabled)),
+label:has(select:not(:disabled)),
+.milkdown-block-handle .operation-item,
+.link-preview .button,
+.link-edit .button {
+  cursor: pointer;
+}
+
+.app-shell .milkdown .milkdown-table-block .cell-handle {
+  cursor: pointer;
+}
+
 .app-shell,
 .app-shell * {
   scrollbar-width: thin;
