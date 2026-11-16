@@ -169,7 +169,9 @@ function renderNode(node: RootContent): VNodeChild {
   <p v-if="loading" class="p-3 text-xs text-slate-400" role="status">
     {{ locale === 'en' ? 'Loading…' : '正在加载…' }}
   </p>
-  <p v-else-if="failed" class="whitespace-pre-wrap p-3">{{ markdown }}</p>
+  <p v-else-if="failed" class="annotation-markdown-content whitespace-pre-wrap p-3">
+    {{ markdown }}
+  </p>
   <div v-else class="milkdown">
     <div class="ProseMirror annotation-markdown-content"><Content /></div>
   </div>

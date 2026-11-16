@@ -102,6 +102,19 @@ test('the old percentage text size maps to the nearest pixel size', () => {
   assert.equal(parsePreferences(read('big')).fontSize, 16);
 });
 
+test('annotation colors keep valid hex values and ignore the rest', () => {
+  const parsed = parsePreferences((key) =>
+    key === preferenceKeys.annotationColors
+      ? { todo: '#ABCDEF', comment: 'red', question: '#123', error: '#112233' }
+      : null,
+  );
+  assert.deepEqual(parsed.annotationColors, {
+    ...defaultPreferences.annotationColors,
+    todo: '#abcdef',
+    error: '#112233',
+  });
+});
+
 test('font family names that could escape the CSS value are refused', () => {
   assert.equal(validFontFamily('PingFang SC'), true);
   assert.equal(validFontFamily('宋体-简'), true);

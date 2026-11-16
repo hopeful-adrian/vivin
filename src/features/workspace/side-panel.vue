@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { History, Pencil, Plus, RotateCcw, Trash2, X } from '@lucide/vue';
-import { computed } from 'vue';
+import { ChevronDown, History, Pencil, Plus, RotateCcw, Trash2, X } from '@lucide/vue';
+import { computed, ref, watch } from 'vue';
 import EmptyPanel from '../../components/empty-panel.vue';
 import LoadingState from '../../components/loading-state.vue';
 import { locale, t } from '../../lib/i18n';
@@ -44,6 +44,32 @@ const titles = computed(() => ({
 const filteredAnnotations = computed(() =>
   data.value.annotations.filter((item) => item.kind === annotationFilter.value),
 );
+
+const termQuery = ref('');
+const expandedTermId = ref<string | null>(null);
+
+watch(focusedTermId, (id) => {
+  if (!id) return;
+  termQuery.value = '';
+  expandedTermId.value = id;
+});
+
+const visibleTerms = computed(() => {
+  const needle = termQuery.value.trim().toLowerCase();
+  if (!needle) return data.value.terms;
+  return data.value.terms.filter(
+    (term) =>
+      term.name.toLowerCase().includes(needle) || term.definition.toLowerCase().includes(needle),
+  );
+});
+
+function termExceptions(id: string) {
+  return data.value.termExceptions.filter((item) => item.termId === id);
+}
+
+function toggleTerm(id: string) {
+  expandedTermId.value = expandedTermId.value === id ? null : id;
+}
 
 function formatTime(value: number): string {
   return new Date(value).toLocaleString(locale.value === 'zh' ? 'zh-CN' : 'en-US', {
@@ -144,65 +170,117 @@ function excerptParts(excerpt: string): { text: string; match: boolean }[] {
       </template>
     </div>
 
-    <div v-else-if="panel === 'terms'" class="min-h-0 flex-1 overflow-y-auto px-8 py-7">
-      <div class="reading-page mx-auto max-w-[860px]">
-        <div class="flex flex-wrap items-start justify-between gap-4">
-          <h1>{{ t('项目术语', 'Project terms') }}</h1>
-          <button
-            class="mt-8 flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-blue-600 hover:bg-blue-50"
-            @click.stop="editTerm()"
-          >
-            <Plus :size="16" />{{ t('新建术语', 'New term') }}
-          </button>
-        </div>
-        <EmptyPanel
-          v-if="data.terms.length === 0"
-          :label="
-            t(
-              '还没有术语。新建后，在文档中悬停同名词语即可查看解释。',
-              'No terms yet. Create one, then hover over matching words in a document.',
-            )
-          "
+    <div v-else-if="panel === 'terms'" class="flex min-h-0 flex-1 flex-col">
+      <div class="flex shrink-0 items-center gap-2 border-b border-slate-100 px-4 py-3">
+        <input
+          v-model="termQuery"
+          :placeholder="t('搜索术语名称或解释', 'Search term names or definitions')"
+          class="min-w-0 flex-1 rounded-lg bg-slate-100 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-200"
         />
-        <section
-          v-for="term in data.terms"
-          :id="`term-${term.id}`"
-          :key="term.id"
-          class="group mb-10 scroll-mt-10"
+        <span class="shrink-0 text-xs text-slate-400">
+          {{
+            termQuery.trim()
+              ? `${visibleTerms.length} / ${data.terms.length}`
+              : t(`${data.terms.length} 条`, `${data.terms.length} terms`)
+          }}
+        </span>
+        <button
+          class="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-sm text-blue-600 hover:bg-blue-50"
+          @click.stop="editTerm()"
         >
-          <div class="flex items-start justify-between gap-4">
-            <h2 :class="focusedTermId === term.id ? 'text-blue-700' : ''">{{ term.name }}</h2>
-            <div class="flex shrink-0 items-center gap-1 text-slate-500">
-              <button
-                class="rounded-md p-1.5 hover:bg-slate-100"
-                :title="t('编辑术语', 'Edit term')"
-                @click.stop="editTerm(term)"
-              >
-                <Pencil :size="15" />
-              </button>
-              <button
-                class="rounded-md p-1.5 text-rose-600 hover:bg-slate-100"
-                :title="t('删除术语', 'Delete term')"
-                @click.stop="removeTerm(term.id)"
-              >
-                <Trash2 :size="15" />
-              </button>
-            </div>
-          </div>
-          <p class="mt-3 text-base leading-8 whitespace-pre-wrap text-slate-600">
-            {{ term.definition }}
-          </p>
-          <div
-            v-for="exception in data.termExceptions.filter((item) => item.termId === term.id)"
-            :key="exception.id"
-            class="mt-3 text-sm leading-6 text-slate-500"
+          <Plus :size="16" />{{ t('新建', 'New') }}
+        </button>
+      </div>
+      <div class="min-h-0 flex-1 overflow-y-auto px-4 py-2">
+        <div class="mx-auto max-w-[760px]">
+          <EmptyPanel
+            v-if="data.terms.length === 0"
+            :label="
+              t(
+                '还没有术语。新建后，在文档中悬停同名词语即可查看解释。',
+                'No terms yet. Create one, then hover over matching words in a document.',
+              )
+            "
+          />
+          <EmptyPanel
+            v-else-if="visibleTerms.length === 0"
+            :label="t('没有匹配的术语。', 'No matching terms.')"
+          />
+          <article
+            v-for="term in visibleTerms"
+            :id="`term-${term.id}`"
+            :key="term.id"
+            class="group scroll-mt-4 border-b border-slate-100 py-2.5"
+            :class="focusedTermId === term.id ? 'bg-blue-50/80' : ''"
           >
-            {{ exception.document }} · {{ t('此处已关闭解释', 'Definition hidden here') }}
-            <button class="ml-2 text-blue-600" @click.stop="restoreTermException(exception)">
-              {{ t('恢复', 'Restore') }}
-            </button>
-          </div>
-        </section>
+            <div class="flex items-start gap-2">
+              <button
+                class="min-w-0 flex-1 rounded-md px-2 py-1 text-left"
+                :aria-expanded="expandedTermId === term.id"
+                @click.stop="toggleTerm(term.id)"
+              >
+                <span
+                  class="block text-[15px] font-medium"
+                  :class="focusedTermId === term.id ? 'text-blue-700' : 'text-slate-900'"
+                >
+                  {{ term.name }}
+                </span>
+                <span
+                  v-if="expandedTermId !== term.id"
+                  class="mt-0.5 line-clamp-2 text-sm leading-6 break-words whitespace-pre-wrap text-slate-500"
+                >
+                  {{ term.definition }}
+                </span>
+              </button>
+              <div class="mt-1 flex shrink-0 items-center text-slate-400">
+                <button
+                  class="rounded-md p-1.5 opacity-0 hover:bg-slate-100 hover:text-slate-700 group-hover:opacity-100 group-focus-within:opacity-100"
+                  :class="expandedTermId === term.id ? 'opacity-100' : ''"
+                  :title="t('编辑术语', 'Edit term')"
+                  @click.stop="editTerm(term)"
+                >
+                  <Pencil :size="14" />
+                </button>
+                <button
+                  class="rounded-md p-1.5 text-rose-600 opacity-0 hover:bg-rose-50 group-hover:opacity-100 group-focus-within:opacity-100"
+                  :class="expandedTermId === term.id ? 'opacity-100' : ''"
+                  :title="t('删除术语', 'Delete term')"
+                  @click.stop="removeTerm(term.id)"
+                >
+                  <Trash2 :size="14" />
+                </button>
+                <button
+                  class="rounded-md p-1.5 hover:bg-slate-100 hover:text-slate-700"
+                  :aria-label="
+                    expandedTermId === term.id ? t('收起', 'Collapse') : t('展开', 'Expand')
+                  "
+                  @click.stop="toggleTerm(term.id)"
+                >
+                  <ChevronDown
+                    :size="16"
+                    class="transition-transform"
+                    :class="expandedTermId === term.id ? 'rotate-180' : ''"
+                  />
+                </button>
+              </div>
+            </div>
+            <div v-if="expandedTermId === term.id" class="px-2 pt-1 pb-2">
+              <p class="text-sm leading-7 break-words whitespace-pre-wrap text-slate-600">
+                {{ term.definition }}
+              </p>
+              <div
+                v-for="exception in termExceptions(term.id)"
+                :key="exception.id"
+                class="mt-2 text-xs leading-5 text-slate-500"
+              >
+                {{ exception.document }} · {{ t('此处已关闭解释', 'Definition hidden here') }}
+                <button class="ml-2 text-blue-600" @click.stop="restoreTermException(exception)">
+                  {{ t('恢复', 'Restore') }}
+                </button>
+              </div>
+            </div>
+          </article>
+        </div>
       </div>
     </div>
 
@@ -218,7 +296,7 @@ function excerptParts(excerpt: string): { text: string; match: boolean }[] {
           :aria-pressed="annotationFilter === kind.value"
           @click.stop="annotationFilter = kind.value"
         >
-          <i class="h-1.5 w-1.5 rounded-full" :style="{ background: kind.color }" />{{
+          <i class="h-1.5 w-1.5 rounded-full" :style="{ background: kindColor(kind.value) }" />{{
             kindLabel(kind.value)
           }}
         </button>

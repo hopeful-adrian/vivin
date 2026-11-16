@@ -91,7 +91,7 @@ const { theme } = usePreferences();
       <textarea
         id="vivin-annotation-note"
         v-model="annotationDraft"
-        class="min-h-0 w-full flex-1 resize-none rounded-lg bg-slate-50 p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-blue-200"
+        class="min-h-0 w-full flex-1 resize-none rounded-lg bg-slate-50 p-3 text-[length:var(--editor-font-size,16px)] leading-[var(--document-line-height,1.5)] outline-none focus:ring-2 focus:ring-blue-200"
         rows="10"
         :aria-label="t('标注说明', 'Annotation note')"
         @keydown.esc.stop="annotationEditing = false"

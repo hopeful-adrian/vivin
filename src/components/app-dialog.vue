@@ -10,7 +10,10 @@ import { dialog, finishDialog } from '../features/ui/use-dialog';
     @click.self="finishDialog(false)"
   >
     <div
-      class="w-[min(420px,calc(100vw-32px))] rounded-2xl bg-white p-5 shadow-2xl"
+      class="rounded-2xl bg-white p-5 shadow-2xl"
+      :class="
+        dialog.multiline ? 'w-[min(560px,calc(100vw-32px))]' : 'w-[min(420px,calc(100vw-32px))]'
+      "
       role="dialog"
       aria-modal="true"
       :aria-label="dialog.title"
@@ -20,8 +23,18 @@ import { dialog, finishDialog } from '../features/ui/use-dialog';
       <p v-if="dialog.message" class="mt-2 text-sm leading-6 text-slate-500">
         {{ dialog.message }}
       </p>
+      <textarea
+        v-if="dialog.kind === 'text' && dialog.multiline"
+        id="vivin-dialog-input"
+        v-model="dialog.value"
+        rows="6"
+        class="mt-4 min-h-36 w-full resize-y rounded-lg bg-slate-100 px-3 py-2 text-sm leading-6 outline-none focus:ring-2 focus:ring-blue-200"
+        @keydown.meta.enter.stop.prevent="finishDialog(true)"
+        @keydown.ctrl.enter.stop.prevent="finishDialog(true)"
+        @keydown.esc.stop="finishDialog(false)"
+      />
       <input
-        v-if="dialog.kind === 'text'"
+        v-else-if="dialog.kind === 'text'"
         id="vivin-dialog-input"
         v-model="dialog.value"
         class="mt-4 w-full rounded-lg bg-slate-100 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-200"

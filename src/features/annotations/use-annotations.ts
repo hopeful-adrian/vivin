@@ -9,17 +9,21 @@ import {
 } from '../../lib/project-api';
 import { documents } from '../documents/use-documents';
 import { data, lockSource, onProjectReset, refresh } from '../project/use-project';
+import { defaultAnnotationColors } from '../settings/preferences';
+import { usePreferences } from '../settings/use-preferences';
 import { confirmAction, requestText } from '../ui/use-dialog';
 import { notify, report } from '../ui/use-toast';
 import { sourceEditors } from '../workspace/editor-registry';
 import { activePane, activePath, currentDoc, panes } from '../workspace/use-panes';
 
-export const annotationKinds: { value: AnnotationKind; zh: string; en: string; color: string }[] = [
-  { value: 'todo', zh: '待办', en: 'Todo', color: '#d69e16' },
-  { value: 'comment', zh: '批注', en: 'Comment', color: '#2f7bdd' },
-  { value: 'question', zh: '疑问', en: 'Question', color: '#ea701b' },
-  { value: 'error', zh: '错误', en: 'Error', color: '#e04c66' },
+export const annotationKinds: { value: AnnotationKind; zh: string; en: string }[] = [
+  { value: 'todo', zh: '待办', en: 'Todo' },
+  { value: 'comment', zh: '批注', en: 'Comment' },
+  { value: 'question', zh: '疑问', en: 'Question' },
+  { value: 'error', zh: '错误', en: 'Error' },
 ];
+
+const { preferences } = usePreferences();
 
 export function kindLabel(kind: AnnotationKind): string {
   const item = annotationKinds.find((entry) => entry.value === kind);
@@ -27,7 +31,7 @@ export function kindLabel(kind: AnnotationKind): string {
 }
 
 export function kindColor(kind: AnnotationKind): string {
-  return annotationKinds.find((entry) => entry.value === kind)?.color ?? '#94a3b8';
+  return preferences.annotationColors[kind] ?? defaultAnnotationColors[kind] ?? '#94a3b8';
 }
 
 export const selectedAnnotation = ref<Annotation | null>(null);
@@ -241,7 +245,9 @@ export async function addAnnotation(
     );
     return;
   }
-  const note = await requestText(t('标注说明（可留空）', 'Annotation note (optional)'), '');
+  const note = await requestText(t('标注说明（可留空）', 'Annotation note (optional)'), '', {
+    multiline: true,
+  });
   if (note === null) return;
   try {
     await upsertAnnotation({

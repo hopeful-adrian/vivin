@@ -1,5 +1,6 @@
 import type { DocumentTheme } from '../../lib/editor-theme';
 import type { Locale } from '../../lib/i18n';
+import type { AnnotationKind } from '../../lib/project-api';
 
 export type Appearance = 'light' | 'dark' | 'system';
 export type NewPaneMode = 'same' | 'source' | 'rendered';
@@ -29,6 +30,7 @@ export interface Preferences {
   typewriterScroll: boolean;
   termHints: boolean;
   annotationMinimap: boolean;
+  annotationColors: Record<AnnotationKind, string>;
   statusItems: StatusItem[];
   /** CJK characters per minute; Latin words are read at a proportional pace. */
   readingSpeed: number;
@@ -39,6 +41,13 @@ export const fontSizes = [14, 15, 16, 17, 18, 20, 22] as const;
 export const indentWidths = [2, 4] as const;
 export const readingSpeeds = [300, 400, 500] as const;
 export const statusItems: readonly StatusItem[] = ['words', 'characters', 'readingTime'];
+export const defaultAnnotationColors: Record<AnnotationKind, string> = {
+  todo: '#d69e16',
+  comment: '#2f7bdd',
+  question: '#ea701b',
+  error: '#e04c66',
+};
+
 export const selectionColors = [
   '#3b82f6',
   '#22c55e',
@@ -68,6 +77,7 @@ export const defaultPreferences: Preferences = {
   typewriterScroll: false,
   termHints: true,
   annotationMinimap: true,
+  annotationColors: { ...defaultAnnotationColors },
   statusItems: [...statusItems],
   readingSpeed: 400,
   checkUpdates: true,
@@ -94,6 +104,7 @@ export const preferenceKeys: Record<keyof Preferences, string> = {
   typewriterScroll: 'vivin.typewriter-scroll',
   termHints: 'vivin.term-hints',
   annotationMinimap: 'vivin.annotation-minimap',
+  annotationColors: 'vivin.annotation-colors',
   statusItems: 'vivin.status-items',
   readingSpeed: 'vivin.reading-speed',
   checkUpdates: 'vivin.check-updates',
@@ -119,6 +130,20 @@ export function validFontFamily(value: unknown): value is string {
     !/["'\\;{}<>]/.test(value) &&
     [...value].every((character) => character >= ' ')
   );
+}
+
+function hexColor(value: unknown): string | null {
+  return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : null;
+}
+
+function annotationColors(value: unknown): Record<AnnotationKind, string> {
+  const source = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  const colors = { ...defaultAnnotationColors };
+  for (const kind of Object.keys(colors) as AnnotationKind[]) {
+    const color = hexColor(source[kind]);
+    if (color) colors[kind] = color;
+  }
+  return colors;
 }
 
 function storedFontSize(read: (key: string) => unknown): number {
@@ -167,10 +192,7 @@ export function parsePreferences(read: (key: string) => unknown): Preferences {
       ['narrow', 'standard', 'wide', 'full'],
       defaults.contentWidth,
     ),
-    selectionColor:
-      typeof selectionColor === 'string' && /^#[0-9a-f]{6}$/i.test(selectionColor)
-        ? selectionColor.toLowerCase()
-        : defaults.selectionColor,
+    selectionColor: hexColor(selectionColor) ?? defaults.selectionColor,
     newPaneMode: oneOf(
       read(preferenceKeys.newPaneMode),
       ['same', 'source', 'rendered'],
@@ -188,6 +210,7 @@ export function parsePreferences(read: (key: string) => unknown): Preferences {
     typewriterScroll: flag(read(preferenceKeys.typewriterScroll), defaults.typewriterScroll),
     termHints: flag(read(preferenceKeys.termHints), defaults.termHints),
     annotationMinimap: flag(read(preferenceKeys.annotationMinimap), defaults.annotationMinimap),
+    annotationColors: annotationColors(read(preferenceKeys.annotationColors)),
     statusItems: Array.isArray(storedStatus)
       ? statusItems.filter((item) => storedStatus.includes(item))
       : [...defaults.statusItems],
@@ -223,6 +246,8 @@ export function editorStyle(preferences: Preferences): Record<string, string> {
   if (preferences.selectionColor)
     style['--editor-selection'] =
       `color-mix(in srgb, ${preferences.selectionColor} 38%, transparent)`;
+  for (const [kind, color] of Object.entries(preferences.annotationColors))
+    style[`--annotation-${kind}`] = color;
   return style;
 }
 

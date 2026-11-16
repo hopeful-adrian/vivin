@@ -7,12 +7,15 @@ import {
   bridgeInfo,
   nativeAvailable,
   openLogDirectory,
+  type AnnotationKind,
   type BridgeInfo,
 } from '../../lib/project-api';
+import { annotationKinds, kindLabel } from '../annotations/use-annotations';
 import { commands, settingsTab } from '../commands/use-commands';
 import { notify, report } from '../ui/use-toast';
 import { settingsOpen, shortcutLabel } from '../workspace/use-layout';
 import {
+  defaultAnnotationColors,
   editorStyle,
   fontSizes,
   indentWidths,
@@ -126,6 +129,20 @@ const customSelection = computed(
 
 function swatch(color: string) {
   return { background: `color-mix(in srgb, ${color} 38%, transparent)` };
+}
+
+const annotationColorsChanged = computed(() =>
+  (Object.keys(defaultAnnotationColors) as AnnotationKind[]).some(
+    (kind) => preferences.annotationColors[kind] !== defaultAnnotationColors[kind],
+  ),
+);
+
+function setAnnotationColor(kind: AnnotationKind, color: string) {
+  preferences.annotationColors = { ...preferences.annotationColors, [kind]: color.toLowerCase() };
+}
+
+function resetAnnotationColors() {
+  preferences.annotationColors = { ...defaultAnnotationColors };
 }
 
 function toggleStatusItem(item: StatusItem) {
@@ -540,6 +557,41 @@ function statusLabel(item: StatusItem) {
                 class="settings-switch"
               />
             </label>
+            <div class="settings-row is-stacked">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <p class="font-medium">{{ t('标注颜色', 'Annotation colors') }}</p>
+                  <p class="settings-hint">
+                    {{
+                      t(
+                        '正文高亮和侧栏底部圆点使用这些颜色',
+                        'Document highlights and the sidebar dots use these colors',
+                      )
+                    }}
+                  </p>
+                </div>
+                <button
+                  v-if="annotationColorsChanged"
+                  class="shrink-0 text-xs text-blue-600 hover:underline"
+                  @click="resetAnnotationColors"
+                >
+                  {{ t('恢复默认', 'Reset') }}
+                </button>
+              </div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <label v-for="kind in annotationKinds" :key="kind.value" class="settings-color">
+                  <input
+                    type="color"
+                    :aria-label="kindLabel(kind.value)"
+                    :value="preferences.annotationColors[kind.value]"
+                    @input="
+                      setAnnotationColor(kind.value, ($event.target as HTMLInputElement).value)
+                    "
+                  />
+                  <span>{{ kindLabel(kind.value) }}</span>
+                </label>
+              </div>
+            </div>
 
             <p class="settings-group">{{ t('源代码模式', 'Source mode') }}</p>
             <label class="settings-row">

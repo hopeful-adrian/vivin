@@ -13,7 +13,12 @@ import {
 import { ref } from 'vue';
 import { t } from '../../lib/i18n';
 import { openProjectResource, type TreeNode } from '../../lib/project-api';
-import { annotationKinds, annotationFilter, kindLabel } from '../annotations/use-annotations';
+import {
+  annotationKinds,
+  annotationFilter,
+  kindColor,
+  kindLabel,
+} from '../annotations/use-annotations';
 import { closeMenus, openMenu } from '../ui/use-menus';
 import { report } from '../ui/use-toast';
 import {
@@ -355,9 +360,10 @@ function showAnnotations(kind: (typeof annotationKinds)[number]['value']) {
         @click.stop="showAnnotations(kind.value)"
       >
         <span class="flex items-center gap-1.5"
-          ><i class="mx-[3px] h-2 w-2 rounded-full" :style="{ background: kind.color }" />{{
-            kindLabel(kind.value)
-          }}</span
+          ><i
+            class="mx-[3px] h-2 w-2 rounded-full"
+            :style="{ background: kindColor(kind.value) }"
+          />{{ kindLabel(kind.value) }}</span
         ><span class="text-xs text-slate-500">{{ annotationCount(kind.value) }}</span>
       </button>
     </div>

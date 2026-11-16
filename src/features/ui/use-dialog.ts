@@ -4,6 +4,8 @@ export interface DialogOptions {
   message?: string;
   confirmLabel?: string;
   danger?: boolean;
+  /** A multiline note. Enter inserts a line break; ⌘/Ctrl+Enter confirms. */
+  multiline?: boolean;
 }
 
 export interface DialogState extends DialogOptions {

@@ -106,37 +106,30 @@ label:has(select:not(:disabled)),
 }
 
 .vivin-annotation-todo {
-  color: #9a6700;
-  background: rgb(245 158 11 / 16%);
+  --annotation-color: var(--annotation-todo, #d69e16);
 }
 .vivin-annotation-comment {
-  color: #2465b8;
-  background: rgb(47 123 221 / 14%);
+  --annotation-color: var(--annotation-comment, #2f7bdd);
 }
 .vivin-annotation-question {
-  color: #b94c0b;
-  background: rgb(234 112 27 / 14%);
+  --annotation-color: var(--annotation-question, #ea701b);
 }
 .vivin-annotation-error {
-  color: #c73551;
-  background: rgb(224 76 102 / 14%);
+  --annotation-color: var(--annotation-error, #e04c66);
 }
-
-.theme-dark .vivin-annotation-todo {
-  color: #f1bc59;
-  background: rgb(245 158 11 / 18%);
+.vivin-annotation-todo,
+.vivin-annotation-comment,
+.vivin-annotation-question,
+.vivin-annotation-error {
+  color: var(--annotation-color);
+  background: color-mix(in srgb, var(--annotation-color) 16%, transparent);
 }
-.theme-dark .vivin-annotation-comment {
-  color: #8ebcff;
-  background: rgb(47 123 221 / 20%);
-}
-.theme-dark .vivin-annotation-question {
-  color: #ffb477;
-  background: rgb(234 112 27 / 20%);
-}
+.theme-dark .vivin-annotation-todo,
+.theme-dark .vivin-annotation-comment,
+.theme-dark .vivin-annotation-question,
 .theme-dark .vivin-annotation-error {
-  color: #ff8fa2;
-  background: rgb(224 76 102 / 20%);
+  color: color-mix(in srgb, var(--annotation-color) 68%, white);
+  background: color-mix(in srgb, var(--annotation-color) 22%, transparent);
 }
 
 .vivin-term {
@@ -282,6 +275,22 @@ label:has(select:not(:disabled)),
   margin-inline: auto;
 }
 .app-shell .markdown-canvas .milkdown .ProseMirror p {
+  line-height: var(--document-line-height, 1.5);
+}
+/* The note sits outside the document canvas, so it has to opt into the same type size. */
+.app-shell #vivin-annotation-popover .milkdown {
+  --crepe-base-font-size: var(--editor-font-size, 16px);
+  font-size: var(--editor-font-size, 16px);
+  background: transparent;
+  color: inherit;
+}
+.app-shell[data-custom-font] #vivin-annotation-popover .milkdown {
+  --crepe-font-default: var(--editor-font-family), var(--document-font);
+  --crepe-font-title: var(--editor-font-family), var(--document-font);
+}
+.app-shell #vivin-annotation-popover .annotation-markdown-content,
+.app-shell #vivin-annotation-popover .annotation-markdown-content p {
+  font-size: var(--editor-font-size, 16px);
   line-height: var(--document-line-height, 1.5);
 }
 .app-shell .source-editor .cm-scroller {
@@ -566,6 +575,32 @@ kbd {
   border-radius: 2px;
   background: rgb(148 163 184 / 35%);
   color: inherit;
+}
+.settings-color {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 4px;
+  border: 1px solid var(--shell-border);
+  border-radius: 8px;
+  background: var(--shell-panel);
+  cursor: pointer;
+}
+.settings-color input {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+}
+.settings-color input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.settings-color input::-webkit-color-swatch {
+  border: 0;
+  border-radius: 5px;
 }
 .settings-swatch {
   display: inline-flex;
