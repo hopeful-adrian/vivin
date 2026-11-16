@@ -15,14 +15,17 @@ import {
   type TreeNode,
 } from '../../lib/project-api';
 import { documents } from '../documents/use-documents';
-import { readLocalJson } from '../settings/use-preferences';
+import { readLocalJson, usePreferences } from '../settings/use-preferences';
 import { confirmAction, requestText } from '../ui/use-dialog';
 import { closeMenus } from '../ui/use-menus';
 import { notify, report } from '../ui/use-toast';
 import { flushEditors } from '../workspace/editor-registry';
 import { trashLabel } from '../workspace/use-layout';
 import { clearPanes, openDoc, remapPanes } from '../workspace/use-panes';
+import { restoreSession } from '../workspace/use-session';
 import { activateProject, busy, expanded, lockSource, project, refresh } from './use-project';
+
+const { preferences } = usePreferences();
 
 function parentOf(path: string): string {
   const slash = path.lastIndexOf('/');
@@ -65,6 +68,7 @@ export async function switchProject(create: boolean, path?: string) {
     if (!next) return;
     activateProject(next);
     await refresh();
+    void restoreSession().catch(report);
   } catch (error) {
     report(error);
   } finally {
@@ -74,11 +78,12 @@ export async function switchProject(create: boolean, path?: string) {
 
 export async function restoreLastProject() {
   const path = readLocalJson('vivin.last-project');
-  if (typeof path !== 'string' || !path || project.value) return;
+  if (!preferences.restoreSession || typeof path !== 'string' || !path || project.value) return;
   busy.value = true;
   try {
     activateProject(await openProject(path));
     await refresh();
+    void restoreSession().catch(report);
   } catch (error) {
     notify(
       t(

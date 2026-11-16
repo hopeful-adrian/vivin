@@ -23,6 +23,64 @@ pub fn open_release_page(url: String, app: AppHandle) -> AppResult<()> {
         .map_err(|error| AppError::io(error.to_string()))
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FontFamily {
+    family: String,
+    localized: Option<String>,
+}
+
+/// Installed font family names for the text font setting; file paths are never returned.
+#[tauri::command]
+pub async fn list_system_fonts() -> AppResult<Vec<FontFamily>> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let mut database = fontdb::Database::new();
+        database.load_system_fonts();
+        let mut families = std::collections::BTreeMap::<String, Option<String>>::new();
+        for face in database.faces() {
+            let Some((family, _)) = face.families.first() else {
+                continue;
+            };
+            if family.is_empty() || family.starts_with('.') {
+                continue;
+            }
+            let chinese_name = |simplified: bool| {
+                face.families
+                    .iter()
+                    .find(|(name, language)| {
+                        name != family
+                            && if simplified {
+                                matches!(
+                                    language,
+                                    fontdb::Language::Chinese_PeoplesRepublicOfChina
+                                        | fontdb::Language::Chinese_Singapore
+                                )
+                            } else {
+                                matches!(
+                                    language,
+                                    fontdb::Language::Chinese_Taiwan
+                                        | fontdb::Language::Chinese_HongKongSAR
+                                        | fontdb::Language::Chinese_MacaoSAR
+                                )
+                            }
+                    })
+                    .map(|(name, _)| name.clone())
+            };
+            let localized = chinese_name(true).or_else(|| chinese_name(false));
+            let entry = families.entry(family.clone()).or_default();
+            if entry.is_none() {
+                *entry = localized;
+            }
+        }
+        families
+            .into_iter()
+            .map(|(family, localized)| FontFamily { family, localized })
+            .collect()
+    })
+    .await
+    .map_err(|error| AppError::io(error.to_string()))
+}
+
 /// Connection details for local AI clients, shown in Settings.
 #[tauri::command]
 pub fn bridge_info(app: AppHandle) -> AppResult<serde_json::Value> {

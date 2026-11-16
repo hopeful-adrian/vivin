@@ -50,13 +50,12 @@ function storeFor(fake, overrides = {}) {
     api: fake.api,
     publishDrafts: false,
     isLocked: () => false,
-    autoFormat: () => false,
     format: async (content) => content.trim() + '\n',
     conflictLabel: () => '冲突副本',
     onConflictCopy: (copy, source) => events.copies.push({ copy: copy.path, source }),
     onConflictCopyFailed: (path, error) => events.copyFailures.push({ path, error }),
     onError: (error) => events.errors.push(error),
-    delays: { marks: 0, draft: 0, save: 1 },
+    delays: { marks: 0, draft: 0 },
     ...overrides,
   });
   return { store, events };
@@ -73,6 +72,31 @@ test('edits are saved against the revision they were based on', async () => {
   assert.equal(fake.calls.saves[0].revision, '1');
   assert.equal(store.saveState('a.md'), 'saved');
   assert.equal(store.dirty.value, false);
+});
+
+test('edits stay unsaved until a save is requested', async () => {
+  const fake = fakeDisk({ 'a.md': 'A' });
+  const { store } = storeFor(fake);
+  await store.open('a.md');
+  store.setContent('a.md', 'edited');
+  await new Promise((resolve) => setTimeout(resolve, 1600));
+  assert.equal(fake.calls.saves.length, 0);
+  assert.equal(store.saveState('a.md'), 'unsaved');
+});
+
+test('only a save that asks for formatting formats the document', async () => {
+  const fake = fakeDisk({ 'a.md': 'A', 'b.md': 'B' });
+  const { store } = storeFor(fake);
+  await store.open('a.md');
+  await store.open('b.md');
+  store.setContent('a.md', '  a  ');
+  await store.saveOne('a.md');
+  assert.equal(fake.disk.get('a.md'), '  a  ');
+  store.setContent('a.md', '  edited  ');
+  store.setContent('b.md', '  b  ');
+  await store.saveAll(true);
+  assert.equal(fake.disk.get('a.md'), 'edited\n');
+  assert.equal(fake.disk.get('b.md'), 'b\n');
 });
 
 test('panes opening the same document share one state and read it once', async () => {

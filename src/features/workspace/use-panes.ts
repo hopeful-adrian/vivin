@@ -135,6 +135,8 @@ export function paneForPath(path: string): number {
 
 export async function openDoc(path: string, paneIndex = activePane.value) {
   flushEditors();
+  const previous = panes.value[paneIndex]?.path;
+  if (previous && previous !== path) void documents.saveOne(previous);
   if (panel.value === 'terms') panel.value = 'none';
   if (
     panes.value[paneIndex]?.path === path &&
@@ -353,7 +355,9 @@ export function setMode(index: number, mode: Mode) {
 export function closePane(index: number) {
   flushEditors();
   if (panes.value.length <= 1) return;
+  const closed = panes.value[index]?.path;
   panes.value.splice(index, 1);
+  if (closed) void documents.saveOne(closed);
   sourceRevealRequests.value.splice(index, 1);
   pendingJump = null;
   pendingHeadingJumps.clear();

@@ -271,10 +271,38 @@ label:has(select:not(:disabled)),
 
 /* Text size applies to both editing modes; Crepe headings scale in em. */
 .app-shell.app-shell[data-document-theme] .markdown-canvas .milkdown {
-  --crepe-base-font-size: calc(16px * var(--editor-scale, 1));
+  --crepe-base-font-size: var(--editor-font-size, 16px);
+}
+.app-shell.app-shell[data-custom-font] .markdown-canvas .milkdown {
+  --crepe-font-default: var(--editor-font-family), var(--document-font);
+  --crepe-font-title: var(--editor-font-family), var(--document-font);
+}
+.app-shell .markdown-canvas .milkdown .ProseMirror {
+  max-width: calc(var(--document-width, 100%) + 240px);
+  margin-inline: auto;
+}
+.app-shell .markdown-canvas .milkdown .ProseMirror p {
+  line-height: var(--document-line-height, 1.5);
 }
 .app-shell .source-editor .cm-scroller {
-  font-size: calc(14px * var(--editor-scale, 1));
+  font-size: var(--source-font-size, 14px);
+  line-height: var(--source-line-height, 1.7);
+}
+.app-shell[data-selection-color] .markdown-canvas .milkdown .ProseMirror *::selection,
+.app-shell[data-selection-color] .source-editor .cm-content ::selection {
+  background: var(--editor-selection);
+}
+.app-shell[data-selection-color] .source-editor .cm-selectionBackground {
+  background: var(--editor-selection) !important;
+}
+.markdown-canvas .milkdown .ProseMirror-focused .vivin-current-block {
+  border-radius: 4px;
+  background-color: rgb(59 130 246 / 5%);
+  box-shadow: 0 0 0 6px rgb(59 130 246 / 5%);
+}
+.theme-dark .markdown-canvas .milkdown .ProseMirror-focused .vivin-current-block {
+  background-color: rgb(255 255 255 / 4%);
+  box-shadow: 0 0 0 6px rgb(255 255 255 / 4%);
 }
 
 kbd {
@@ -508,6 +536,68 @@ kbd {
   background: #2563eb;
   color: #fff;
 }
+.settings-group {
+  margin-top: 22px;
+  color: var(--shell-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.settings-select {
+  width: 220px;
+  flex-shrink: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--shell-border);
+  border-radius: 8px;
+  background: var(--shell-panel);
+  color: var(--shell-text);
+  font-size: 12px;
+}
+.settings-preview {
+  margin: 8px 0 4px;
+  padding: 14px 18px;
+  border: 1px solid var(--shell-border);
+  border-radius: 10px;
+  background: var(--document-background);
+  color: var(--document-text);
+  font-size: var(--editor-font-size, 16px);
+  line-height: var(--document-line-height, 1.5);
+}
+.settings-preview mark {
+  border-radius: 2px;
+  background: rgb(148 163 184 / 35%);
+  color: inherit;
+}
+.settings-swatch {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--shell-border);
+  border-radius: 7px;
+  color: var(--shell-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.settings-swatch.is-default {
+  width: auto;
+  padding: 0 7px;
+}
+.settings-swatch.is-custom {
+  font-size: 15px;
+}
+.settings-swatch.is-active {
+  border-color: transparent;
+  box-shadow:
+    0 0 0 2px var(--shell-panel),
+    0 0 0 4px #2563eb;
+  color: var(--shell-text);
+}
+.settings-swatch:focus-within,
+.settings-swatch:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
 .settings-code {
   display: flex;
   align-items: center;
@@ -538,9 +628,8 @@ kbd {
   opacity: 0;
   transition: opacity 160ms ease;
 }
-.is-focus-mode .markdown-canvas .milkdown .ProseMirror {
-  max-width: 860px;
-  margin-inline: auto;
+.app-shell.is-focus-mode .markdown-canvas .milkdown .ProseMirror {
+  max-width: min(860px, calc(var(--document-width, 100%) + 240px));
 }
 .is-focus-mode .document-toolbar:hover > *,
 .is-focus-mode .document-status:hover {

@@ -28,7 +28,8 @@ export function visibleText(markdown: string): string {
     .replace(/[*_~`|]/g, '');
 }
 
-export function textStats(markdown: string): TextStats {
+/** `charactersPerMinute` is the CJK reading pace; Latin words follow at 220 per 400 characters. */
+export function textStats(markdown: string, charactersPerMinute = 400): TextStats {
   const text = visibleText(markdown);
   const cjkCount = text.match(cjkAll)?.length ?? 0;
   let latinCount = 0;
@@ -40,6 +41,13 @@ export function textStats(markdown: string): TextStats {
   return {
     words,
     characters,
-    minutes: words ? Math.max(1, Math.round(cjkCount / 400 + latinCount / 220)) : 0,
+    minutes: words
+      ? Math.max(
+          1,
+          Math.round(
+            cjkCount / charactersPerMinute + latinCount / ((charactersPerMinute * 220) / 400),
+          ),
+        )
+      : 0,
   };
 }

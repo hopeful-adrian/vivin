@@ -34,14 +34,13 @@ export interface DocumentStoreOptions {
   /** Shares unsaved text with the native side so AI reads see the editor state. */
   publishDrafts: boolean;
   isLocked(path: string): boolean;
-  autoFormat(): boolean;
   format(content: string): Promise<string>;
   flushEditors?(): void;
   conflictLabel(): string;
   onConflictCopy(copy: Document, source: string): void;
   onConflictCopyFailed(path: string, error: unknown): void;
   onError(error: unknown): void;
-  delays?: Partial<{ marks: number; draft: number; save: number }>;
+  delays?: Partial<{ marks: number; draft: number }>;
 }
 
 export function within(path: string, prefix: string): boolean {
@@ -52,7 +51,7 @@ const revisionBatch = 64;
 
 export function createDocumentStore(options: DocumentStoreOptions) {
   const { api } = options;
-  const delays = { marks: 250, draft: 750, save: 1400, ...options.delays };
+  const delays = { marks: 250, draft: 750, ...options.delays };
   const docs = ref<Record<string, DocState>>({});
   /** Debounced copy of each document used for annotation and term marks. */
   const markContents = shallowRef<Record<string, string>>({});
@@ -65,7 +64,6 @@ export function createDocumentStore(options: DocumentStoreOptions) {
   const draftSequences = new Map<string, number>();
   const draftTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const markTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  let saveTimer: ReturnType<typeof setTimeout> | undefined;
   let generation = 0;
 
   const dirty = computed(() =>
@@ -122,11 +120,6 @@ export function createDocumentStore(options: DocumentStoreOptions) {
     });
   }
 
-  function scheduleSave() {
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => void saveAll(), delays.save);
-  }
-
   function setContent(path: string, content: string) {
     const doc = docs.value[path];
     if (!doc || options.isLocked(path) || doc.content === content) return;
@@ -154,10 +147,10 @@ export function createDocumentStore(options: DocumentStoreOptions) {
         }, delays.draft),
       );
     }
-    scheduleSave();
   }
 
-  async function saveOne(path: string) {
+  /** Only explicit saves format first; implicit saves keep the text exactly as typed. */
+  async function saveOne(path: string, format = false) {
     const doc = docs.value[path];
     if (
       !doc ||
@@ -170,8 +163,7 @@ export function createDocumentStore(options: DocumentStoreOptions) {
       return;
     doc.saving = true;
     try {
-      if (options.autoFormat() && preservedFormatting.get(doc) !== doc.content)
-        await formatOne(path);
+      if (format && preservedFormatting.get(doc) !== doc.content) await formatOne(path);
       if (docs.value[path] !== doc || doc.conflict || options.isLocked(path)) return;
       cancelDraft(path);
       const submitted = doc.content;
@@ -200,11 +192,9 @@ export function createDocumentStore(options: DocumentStoreOptions) {
     }
   }
 
-  async function saveAll() {
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = undefined;
+  async function saveAll(format = false) {
     options.flushEditors?.();
-    await Promise.all(Object.keys(docs.value).map(saveOne));
+    await Promise.all(Object.keys(docs.value).map((path) => saveOne(path, format)));
   }
 
   /**
@@ -377,8 +367,6 @@ export function createDocumentStore(options: DocumentStoreOptions) {
   }
 
   function clearTimers() {
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = undefined;
     for (const timer of draftTimers.values()) clearTimeout(timer);
     for (const timer of markTimers.values()) clearTimeout(timer);
     draftTimers.clear();

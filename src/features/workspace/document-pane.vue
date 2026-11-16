@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import {
-  BookOpenText,
   Check,
   ChevronDown,
   CircleAlert,
@@ -78,7 +77,14 @@ const MarkdownSourceEditor = defineAsyncComponent({
 });
 
 const props = defineProps<{ pane: Pane; index: number }>();
-const { theme } = usePreferences();
+const { preferences, theme } = usePreferences();
+const sourceOptions = computed(() => ({
+  lineNumbers: preferences.lineNumbers,
+  lineWrapping: preferences.lineWrapping,
+  indentWidth: preferences.indentWidth,
+  highlightCurrentLine: preferences.highlightCurrentLine,
+  typewriterScroll: preferences.typewriterScroll,
+}));
 
 const doc = computed(() => (props.pane.path ? documents.docs.value[props.pane.path] : undefined));
 const locked = computed(() => (props.pane.path ? lockSource(props.pane.path) : null));
@@ -90,6 +96,7 @@ const stats = computed(() =>
     props.pane.path
       ? (documents.markContents.value[props.pane.path] ?? doc.value?.content ?? '')
       : '',
+    preferences.readingSpeed,
   ),
 );
 const selected = computed(() => selectedWords.value[props.pane.id] ?? 0);
@@ -141,7 +148,7 @@ function setContent(content: string) {
 
 function onMouseMove(event: MouseEvent) {
   if (handleAnnotationHover(event)) hideTermNow();
-  else showTermHover(event, props.pane.path);
+  else if (preferences.termHints) showTermHover(event, props.pane.path);
 }
 
 function onMouseLeave() {
@@ -245,21 +252,18 @@ const formatTitle = computed(() => `${t('格式化文档', 'Format document')} $
             >
               <ListTree :size="17" />
             </button>
-            <div class="view-switch" role="group" :aria-label="t('编辑模式', 'Editing mode')">
-              <button
-                v-for="mode in ['rendered', 'source'] as const"
-                :key="mode"
-                class="view-switch-button"
-                :class="pane.mode === mode ? 'is-active' : ''"
-                :title="`${mode === 'source' ? t('源代码模式：直接编辑 Markdown 原文', 'Source mode: edit the Markdown text') : t('排版模式：所见即所得地编辑', 'Rendered mode: edit the formatted document')} ${shortcutOf('toggle-mode')}`"
-                :aria-pressed="pane.mode === mode"
-                @click.stop="setMode(index, mode)"
-              >
-                <CodeXml v-if="mode === 'source'" :size="14" />
-                <BookOpenText v-else :size="14" />
-                <span>{{ mode === 'source' ? t('源代码', 'Source') : t('排版', 'Rendered') }}</span>
-              </button>
-            </div>
+            <button
+              class="source-toggle"
+              :class="pane.mode === 'source' ? 'is-on' : ''"
+              role="switch"
+              :aria-checked="pane.mode === 'source'"
+              :title="`${pane.mode === 'source' ? t('正在编辑 Markdown 原文，关闭后回到排版模式', 'Editing the Markdown text. Turn off to return to rendered mode') : t('打开后直接编辑 Markdown 原文', 'Turn on to edit the Markdown text')} ${shortcutOf('toggle-mode')}`"
+              @click.stop="setMode(index, pane.mode === 'source' ? 'rendered' : 'source')"
+            >
+              <CodeXml :size="14" />
+              <span>{{ t('源代码', 'Source') }}</span>
+              <i class="source-toggle-track" aria-hidden="true" />
+            </button>
             <button
               class="format-button"
               :disabled="!!locked || doc.conflict || documents.formattingPaths.value.has(pane.path)"
@@ -373,6 +377,7 @@ const formatTitle = computed(() => `${t('格式化文档', 'Format document')} $
               :ref="sourceEditorRef(pane.id)"
               :model-value="doc.content"
               :document-path="pane.path"
+              :options="sourceOptions"
               :reveal-request="sourceRevealRequests[index] ?? undefined"
               :annotations="marks"
               :search-matches="pane.searchMatches"
@@ -396,10 +401,12 @@ const formatTitle = computed(() => `${t('格式化文档', 'Format document')} $
               :annotations="marks"
               :search-matches="pane.searchMatches"
               :active-search-offset="pane.activeSearchOffset"
-              :terms="termMarksByDocument[pane.path]"
+              :terms="preferences.termHints ? termMarksByDocument[pane.path] : undefined"
               :locale="locale"
               :readonly="!!locked"
               :theme="theme"
+              :highlight-current-block="preferences.highlightCurrentLine"
+              :typewriter-scroll="preferences.typewriterScroll"
               class="min-w-0 flex-1"
               @update:model-value="setContent"
               @error="notify($event, 'error')"
@@ -411,7 +418,10 @@ const formatTitle = computed(() => `${t('格式化文档', 'Format document')} $
               @incompatible="setMode(index, 'source')"
             />
           </div>
-          <div class="annotation-minimap relative flex w-8 shrink-0 flex-col items-center py-2">
+          <div
+            v-if="preferences.annotationMinimap"
+            class="annotation-minimap relative flex w-8 shrink-0 flex-col items-center py-2"
+          >
             <div class="group relative mb-2">
               <button
                 :title="t('筛选缩略条中的标注', 'Filter annotation minimap')"
@@ -460,9 +470,13 @@ const formatTitle = computed(() => `${t('格式化文档', 'Format document')} $
         </div>
         <footer class="document-status shrink-0" role="status">
           <span v-if="selected">{{ t(`已选 ${selected} 字`, `${selected} selected`) }}</span>
-          <span>{{ t(`${stats.words} 字`, `${stats.words} words`) }}</span>
-          <span>{{ t(`${stats.characters} 字符`, `${stats.characters} characters`) }}</span>
-          <span v-if="stats.minutes">{{
+          <span v-if="preferences.statusItems.includes('words')">{{
+            t(`${stats.words} 字`, `${stats.words} words`)
+          }}</span>
+          <span v-if="preferences.statusItems.includes('characters')">{{
+            t(`${stats.characters} 字符`, `${stats.characters} characters`)
+          }}</span>
+          <span v-if="stats.minutes && preferences.statusItems.includes('readingTime')">{{
             t(`约 ${stats.minutes} 分钟读完`, `${stats.minutes} min read`)
           }}</span>
         </footer>

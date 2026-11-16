@@ -14,6 +14,7 @@ import { handleShortcut } from './features/commands/use-shortcuts';
 import { documents } from './features/documents/use-documents';
 import ProjectSidebar from './features/project/project-sidebar.vue';
 import { busy, project } from './features/project/use-project';
+import { editorStyle } from './features/settings/preferences';
 import SettingsDialog from './features/settings/settings-dialog.vue';
 import { usePreferences } from './features/settings/use-preferences';
 import TermDialog from './features/terms/term-dialog.vue';
@@ -78,7 +79,9 @@ onBeforeUnmount(() => {
     ]"
     :data-document-theme="preferences.documentTheme"
     :data-platform="platform"
-    :style="{ '--editor-scale': String(preferences.editorScale) }"
+    :data-custom-font="preferences.fontFamily ? '' : undefined"
+    :data-selection-color="preferences.selectionColor ? '' : undefined"
+    :style="editorStyle(preferences)"
     @click="closeMenus"
   >
     <AppHeader />

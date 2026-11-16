@@ -90,6 +90,11 @@ export interface BridgeInfo {
   configPath: string;
 }
 
+export interface FontFamily {
+  family: string;
+  localized: string | null;
+}
+
 /** Calls a native command and rejects with an `AppError` carrying a stable code. */
 async function call<T>(command: string, args?: InvokeArgs): Promise<T> {
   try {
@@ -315,4 +320,15 @@ export function openReleasePage(url: string): Promise<void> {
 
 export function bridgeInfo(): Promise<BridgeInfo> {
   return call<BridgeInfo>('bridge_info');
+}
+
+export async function listSystemFonts(): Promise<FontFamily[]> {
+  const value = await call<unknown>('list_system_fonts');
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item: unknown) => {
+    if (!item || typeof item !== 'object') return [];
+    const { family, localized } = item as Record<string, unknown>;
+    if (typeof family !== 'string' || !family) return [];
+    return [{ family, localized: typeof localized === 'string' ? localized : null }];
+  });
 }

@@ -12,8 +12,17 @@ import {
 import { commands, settingsTab } from '../commands/use-commands';
 import { notify, report } from '../ui/use-toast';
 import { settingsOpen, shortcutLabel } from '../workspace/use-layout';
-import { editorScales } from './preferences';
+import {
+  editorStyle,
+  fontSizes,
+  indentWidths,
+  readingSpeeds,
+  selectionColors,
+  statusItems,
+  type StatusItem,
+} from './preferences';
 import { usePreferences } from './use-preferences';
+import { loadingFonts, loadSystemFonts, systemFonts } from './use-system-fonts';
 import {
   appVersion,
   availableUpdate,
@@ -41,6 +50,7 @@ const progressLabel = computed(() => {
 
 const tabs = computed(() => [
   { id: 'general' as const, label: t('通用', 'General') },
+  { id: 'text' as const, label: t('文字与排版', 'Text & layout') },
   { id: 'editor' as const, label: t('编辑', 'Editing') },
   { id: 'shortcuts' as const, label: t('快捷键', 'Shortcuts') },
   { id: 'about' as const, label: t('关于', 'About') },
@@ -78,8 +88,59 @@ function openLogs() {
   void openLogDirectory().catch(report);
 }
 
-function scaleLabel(scale: number) {
-  return `${Math.round(scale * 100)}%`;
+watch(
+  () => settingsOpen.value && settingsTab.value === 'text',
+  (visible) => {
+    if (visible) void loadSystemFonts();
+  },
+  { immediate: true },
+);
+
+const fontOptions = computed(() => {
+  const listed = systemFonts.value;
+  const current = preferences.fontFamily;
+  const options = listed.map((font) => ({
+    value: font.family,
+    label:
+      font.localized && preferences.locale === 'zh'
+        ? `${font.localized}（${font.family}）`
+        : font.family,
+  }));
+  if (current && !listed.some((font) => font.family === current))
+    options.unshift({ value: current, label: current });
+  return options;
+});
+
+const previewStyle = computed(() => ({
+  ...editorStyle(preferences),
+  fontFamily: preferences.fontFamily
+    ? `"${preferences.fontFamily}", var(--document-font)`
+    : 'var(--document-font)',
+}));
+
+const customSelection = computed(
+  () =>
+    !!preferences.selectionColor &&
+    !(selectionColors as readonly string[]).includes(preferences.selectionColor),
+);
+
+function swatch(color: string) {
+  return { background: `color-mix(in srgb, ${color} 38%, transparent)` };
+}
+
+function toggleStatusItem(item: StatusItem) {
+  const selected = new Set(preferences.statusItems);
+  if (selected.has(item)) selected.delete(item);
+  else selected.add(item);
+  preferences.statusItems = statusItems.filter((value) => selected.has(value));
+}
+
+function statusLabel(item: StatusItem) {
+  return {
+    words: t('字数', 'Words'),
+    characters: t('字符数', 'Characters'),
+    readingTime: t('阅读时长', 'Reading time'),
+  }[item];
 }
 </script>
 
@@ -173,6 +234,39 @@ function scaleLabel(scale: number) {
                 </button>
               </div>
             </div>
+            <label class="settings-row">
+              <div>
+                <p class="font-medium">
+                  {{ t('启动时恢复上次的项目和文档', 'Reopen the last project and documents') }}
+                </p>
+                <p class="settings-hint">
+                  {{
+                    t(
+                      '恢复分栏、各栏打开的文档和编辑模式；关闭后启动时显示欢迎页',
+                      'Restores panes, their documents and modes; when off, the app starts on the welcome page',
+                    )
+                  }}
+                </p>
+              </div>
+              <input v-model="preferences.restoreSession" type="checkbox" class="settings-switch" />
+            </label>
+          </template>
+
+          <template v-else-if="settingsTab === 'text'">
+            <div class="settings-preview" :style="previewStyle" aria-hidden="true">
+              <p>
+                {{ t('这是一段正文预览，', 'This paragraph previews the text, ')
+                }}<mark
+                  :style="preferences.selectionColor ? swatch(preferences.selectionColor) : {}"
+                  >{{ t('选中的文字', 'selected words') }}</mark
+                >{{
+                  t(
+                    '会以所选颜色高亮。字号和行高同时作用于排版和源代码模式。',
+                    ' use the chosen highlight. Size and line height apply to both modes.',
+                  )
+                }}
+              </p>
+            </div>
             <div class="settings-row">
               <div>
                 <p class="font-medium">{{ t('Markdown 主题', 'Markdown theme') }}</p>
@@ -202,39 +296,147 @@ function scaleLabel(scale: number) {
               <div>
                 <p class="font-medium">{{ t('正文字号', 'Text size') }}</p>
                 <p class="settings-hint">
-                  {{ t('同时作用于排版和源代码模式', 'Applies to both editing modes') }}
+                  {{
+                    t(
+                      '排版模式的正文字号；源代码模式小 2px',
+                      'Rendered text size; source mode is 2px smaller',
+                    )
+                  }}
                 </p>
               </div>
               <div class="settings-segment" role="radiogroup">
                 <button
-                  v-for="scale in editorScales"
-                  :key="scale"
+                  v-for="size in fontSizes"
+                  :key="size"
                   role="radio"
-                  :aria-checked="preferences.editorScale === scale"
-                  :class="preferences.editorScale === scale ? 'is-active' : ''"
-                  @click="preferences.editorScale = scale"
+                  :aria-checked="preferences.fontSize === size"
+                  :class="preferences.fontSize === size ? 'is-active' : ''"
+                  @click="preferences.fontSize = size"
                 >
-                  {{ scaleLabel(scale) }}
+                  {{ size }}
                 </button>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div>
+                <p class="font-medium">{{ t('正文字体', 'Text font') }}</p>
+                <p class="settings-hint">
+                  {{
+                    loadingFonts
+                      ? t('正在读取系统字体…', 'Reading installed fonts…')
+                      : t(
+                          '从本机已安装的字体中选择，作用于排版模式；源代码模式保持等宽字体',
+                          'Installed fonts, used in rendered mode; source mode stays monospaced',
+                        )
+                  }}
+                </p>
+              </div>
+              <select v-model="preferences.fontFamily" class="settings-select">
+                <option value="">{{ t('跟随 Markdown 主题', 'Markdown theme default') }}</option>
+                <option v-for="font in fontOptions" :key="font.value" :value="font.value">
+                  {{ font.label }}
+                </option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <div>
+                <p class="font-medium">{{ t('行高', 'Line height') }}</p>
+              </div>
+              <div class="settings-segment" role="radiogroup">
+                <button
+                  v-for="option in [
+                    { value: 'compact', label: t('紧凑', 'Compact') },
+                    { value: 'standard', label: t('标准', 'Standard') },
+                    { value: 'relaxed', label: t('宽松', 'Relaxed') },
+                  ] as const"
+                  :key="option.value"
+                  role="radio"
+                  :aria-checked="preferences.lineHeight === option.value"
+                  :class="preferences.lineHeight === option.value ? 'is-active' : ''"
+                  @click="preferences.lineHeight = option.value"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div>
+                <p class="font-medium">{{ t('正文宽度', 'Text width') }}</p>
+                <p class="settings-hint">
+                  {{
+                    t(
+                      '排版模式中每行的最大宽度，宽屏时正文居中',
+                      'Maximum line width in rendered mode, centered on wide screens',
+                    )
+                  }}
+                </p>
+              </div>
+              <div class="settings-segment" role="radiogroup">
+                <button
+                  v-for="option in [
+                    { value: 'narrow', label: t('窄', 'Narrow') },
+                    { value: 'standard', label: t('标准', 'Standard') },
+                    { value: 'wide', label: t('宽', 'Wide') },
+                    { value: 'full', label: t('铺满', 'Full') },
+                  ] as const"
+                  :key="option.value"
+                  role="radio"
+                  :aria-checked="preferences.contentWidth === option.value"
+                  :class="preferences.contentWidth === option.value ? 'is-active' : ''"
+                  @click="preferences.contentWidth = option.value"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div>
+                <p class="font-medium">{{ t('选中文字的高亮颜色', 'Selection color') }}</p>
+                <p class="settings-hint">
+                  {{ t('鼠标或键盘选中文字时的背景色', 'Background of selected text') }}
+                </p>
+              </div>
+              <div class="flex shrink-0 items-center gap-1.5" role="radiogroup">
+                <button
+                  class="settings-swatch is-default"
+                  role="radio"
+                  :aria-checked="!preferences.selectionColor"
+                  :class="!preferences.selectionColor ? 'is-active' : ''"
+                  :title="t('跟随主题', 'Theme default')"
+                  @click="preferences.selectionColor = ''"
+                >
+                  {{ t('默认', 'Auto') }}
+                </button>
+                <button
+                  v-for="color in selectionColors"
+                  :key="color"
+                  class="settings-swatch"
+                  role="radio"
+                  :aria-checked="preferences.selectionColor === color"
+                  :aria-label="color"
+                  :class="preferences.selectionColor === color ? 'is-active' : ''"
+                  :style="swatch(color)"
+                  @click="preferences.selectionColor = color"
+                />
+                <label
+                  class="settings-swatch is-custom"
+                  :class="customSelection ? 'is-active' : ''"
+                  :style="customSelection ? swatch(preferences.selectionColor) : {}"
+                  :title="t('自定义颜色', 'Custom color')"
+                >
+                  <input
+                    type="color"
+                    class="sr-only"
+                    :value="preferences.selectionColor || '#3b82f6'"
+                    @input="preferences.selectionColor = ($event.target as HTMLInputElement).value"
+                  />
+                  <span aria-hidden="true">+</span>
+                </label>
               </div>
             </div>
           </template>
 
           <template v-else-if="settingsTab === 'editor'">
-            <label class="settings-row">
-              <div>
-                <p class="font-medium">{{ t('保存时自动格式化', 'Format on save') }}</p>
-                <p class="settings-hint">
-                  {{
-                    t(
-                      '只处理修改过的文档；无法安全格式化时保留原文',
-                      'Only changed documents; the source is kept when formatting is not safe',
-                    )
-                  }}
-                </p>
-              </div>
-              <input v-model="preferences.autoFormat" type="checkbox" class="settings-switch" />
-            </label>
             <div class="settings-row">
               <div>
                 <p class="font-medium">{{ t('新分栏打开方式', 'New split opens in') }}</p>
@@ -256,6 +458,176 @@ function scaleLabel(scale: number) {
                 </button>
               </div>
             </div>
+            <label class="settings-row">
+              <div>
+                <p class="font-medium">{{ t('保存时格式化', 'Format on save') }}</p>
+                <p class="settings-hint">
+                  {{
+                    t(
+                      '按 ⌘/Ctrl+S 时先整理修改过的文档；切换文档或关闭窗口时的保存不做格式化',
+                      'Tidies changed documents on ⌘/Ctrl+S; saves on switching or closing never format',
+                    )
+                  }}
+                </p>
+              </div>
+              <input v-model="preferences.formatOnSave" type="checkbox" class="settings-switch" />
+            </label>
+            <label class="settings-row">
+              <div>
+                <p class="font-medium">{{ t('高亮当前行', 'Highlight current line') }}</p>
+                <p class="settings-hint">
+                  {{
+                    t(
+                      '源代码模式高亮光标所在行，排版模式高亮光标所在段落',
+                      'The caret line in source mode, the caret paragraph in rendered mode',
+                    )
+                  }}
+                </p>
+              </div>
+              <input
+                v-model="preferences.highlightCurrentLine"
+                type="checkbox"
+                class="settings-switch"
+              />
+            </label>
+            <label class="settings-row">
+              <div>
+                <p class="font-medium">{{ t('打字机滚动', 'Typewriter scrolling') }}</p>
+                <p class="settings-hint">
+                  {{
+                    t(
+                      '输入或用键盘移动光标时，让当前行保持在屏幕中部',
+                      'Keeps the current line centered while typing or moving with the keyboard',
+                    )
+                  }}
+                </p>
+              </div>
+              <input
+                v-model="preferences.typewriterScroll"
+                type="checkbox"
+                class="settings-switch"
+              />
+            </label>
+            <label class="settings-row">
+              <div>
+                <p class="font-medium">{{ t('术语悬停解释', 'Term hints') }}</p>
+                <p class="settings-hint">
+                  {{
+                    t(
+                      '在正文中标出项目术语，悬停时显示解释',
+                      'Underlines project terms in the text and explains them on hover',
+                    )
+                  }}
+                </p>
+              </div>
+              <input v-model="preferences.termHints" type="checkbox" class="settings-switch" />
+            </label>
+            <label class="settings-row">
+              <div>
+                <p class="font-medium">{{ t('标注缩略条', 'Annotation minimap') }}</p>
+                <p class="settings-hint">
+                  {{
+                    t(
+                      '在正文右侧显示标注位置，点击可定位',
+                      'Shows annotation positions beside the text; click to jump',
+                    )
+                  }}
+                </p>
+              </div>
+              <input
+                v-model="preferences.annotationMinimap"
+                type="checkbox"
+                class="settings-switch"
+              />
+            </label>
+
+            <p class="settings-group">{{ t('源代码模式', 'Source mode') }}</p>
+            <label class="settings-row">
+              <p class="font-medium">{{ t('显示行号', 'Line numbers') }}</p>
+              <input v-model="preferences.lineNumbers" type="checkbox" class="settings-switch" />
+            </label>
+            <label class="settings-row">
+              <div>
+                <p class="font-medium">{{ t('自动换行', 'Wrap lines') }}</p>
+                <p class="settings-hint">
+                  {{ t('关闭后长行横向滚动', 'When off, long lines scroll horizontally') }}
+                </p>
+              </div>
+              <input v-model="preferences.lineWrapping" type="checkbox" class="settings-switch" />
+            </label>
+            <div class="settings-row">
+              <div>
+                <p class="font-medium">{{ t('缩进宽度', 'Indent width') }}</p>
+                <p class="settings-hint">
+                  {{
+                    t(
+                      '⌘/Ctrl+] 与自动缩进使用的空格数',
+                      'Spaces used by ⌘/Ctrl+] and automatic indentation',
+                    )
+                  }}
+                </p>
+              </div>
+              <div class="settings-segment" role="radiogroup">
+                <button
+                  v-for="width in indentWidths"
+                  :key="width"
+                  role="radio"
+                  :aria-checked="preferences.indentWidth === width"
+                  :class="preferences.indentWidth === width ? 'is-active' : ''"
+                  @click="preferences.indentWidth = width"
+                >
+                  {{ t(`${width} 个空格`, `${width} spaces`) }}
+                </button>
+              </div>
+            </div>
+
+            <p class="settings-group">{{ t('状态栏', 'Status bar') }}</p>
+            <div class="settings-row">
+              <div>
+                <p class="font-medium">{{ t('显示的统计', 'Statistics') }}</p>
+                <p class="settings-hint">
+                  {{ t('有选区时始终显示选中字数', 'The selected word count is always shown') }}
+                </p>
+              </div>
+              <div class="settings-segment" role="group">
+                <button
+                  v-for="item in statusItems"
+                  :key="item"
+                  :aria-pressed="preferences.statusItems.includes(item)"
+                  :class="preferences.statusItems.includes(item) ? 'is-active' : ''"
+                  @click="toggleStatusItem(item)"
+                >
+                  {{ statusLabel(item) }}
+                </button>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div>
+                <p class="font-medium">{{ t('阅读速度', 'Reading speed') }}</p>
+                <p class="settings-hint">
+                  {{
+                    t(
+                      '用于估算阅读时长（中文按每分钟字数）',
+                      'Used for the reading time estimate (CJK characters per minute)',
+                    )
+                  }}
+                </p>
+              </div>
+              <div class="settings-segment" role="radiogroup">
+                <button
+                  v-for="speed in readingSpeeds"
+                  :key="speed"
+                  role="radio"
+                  :aria-checked="preferences.readingSpeed === speed"
+                  :class="preferences.readingSpeed === speed ? 'is-active' : ''"
+                  @click="preferences.readingSpeed = speed"
+                >
+                  {{ t(`${speed} 字/分`, `${speed}/min`) }}
+                </button>
+              </div>
+            </div>
+
+            <p class="settings-group">{{ t('其他', 'Other') }}</p>
             <div class="settings-row">
               <div>
                 <p class="font-medium">{{ t('版本历史', 'Version history') }}</p>

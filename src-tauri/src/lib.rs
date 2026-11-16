@@ -73,6 +73,7 @@ pub fn run() {
             system::open_log_directory,
             system::open_release_page,
             system::bridge_info,
+            system::list_system_fonts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

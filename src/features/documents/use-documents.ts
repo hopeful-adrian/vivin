@@ -12,12 +12,10 @@ import {
   type Document,
 } from '../../lib/project-api';
 import { lockSource, onProjectReset } from '../project/use-project';
-import { usePreferences } from '../settings/use-preferences';
 import { notify, report } from '../ui/use-toast';
 import { flushEditors } from '../workspace/editor-registry';
 import { createDocumentStore } from './document-store';
 
-const { preferences } = usePreferences();
 const conflictHandlers: ((copy: Document, source: string) => void)[] = [];
 
 function pad(value: number) {
@@ -41,7 +39,6 @@ export const documents = createDocumentStore({
   },
   publishDrafts: nativeAvailable(),
   isLocked: (path) => lockSource(path) !== null,
-  autoFormat: () => preferences.autoFormat,
   format: formatDocument,
   flushEditors,
   conflictLabel,

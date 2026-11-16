@@ -13,7 +13,6 @@ localStorage.setItem(
   JSON.stringify(params.get('documentTheme') ?? 'frame'),
 );
 localStorage.setItem('vivin.check-updates', 'false');
-localStorage.setItem('vivin.auto-format', 'false');
 const quote = '批注锚点';
 const markdown = `# 编辑器验收\n\n${quote} 和普通正文。\n\n## 第二节\n\n可以直接编辑 **粗体** 和列表。\n\n- 第一项\n- 第二项\n\n`;
 const originals = {
@@ -191,6 +190,12 @@ mockIPC(
     if (command === 'bridge_info')
       return { url: 'http://127.0.0.1:47321/mcp', configPath: '~/.vivin/bridge.json' };
     if (command === 'plugin:app|version') return '0.1.0';
+    if (command === 'list_system_fonts')
+      return [
+        { family: 'Georgia', localized: null },
+        { family: 'PingFang SC', localized: '苹方-简' },
+        { family: 'Songti SC', localized: '宋体-简' },
+      ];
     if (command === 'plugin:updater|check')
       return params.has('update')
         ? { rid: 1, currentVersion: '0.1.0', version: '0.2.0', rawJson: {} }

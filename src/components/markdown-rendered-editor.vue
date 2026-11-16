@@ -3,7 +3,10 @@ import { Crepe, CrepeFeature } from '@milkdown/crepe';
 import { editorViewCtx, parserCtx, schemaCtx, serializerCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { uploadConfig } from '@milkdown/kit/plugin/upload';
+import { headingIdGenerator, remarkPreserveEmptyLinePlugin } from '@milkdown/kit/preset/commonmark';
+import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 import { Plugin, PluginKey, type EditorState } from '@milkdown/kit/prose/state';
+import { Transform } from '@milkdown/kit/prose/transform';
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -40,6 +43,8 @@ const props = defineProps<{
   theme?: 'light' | 'dark';
   embedded?: boolean;
   deferMermaid?: boolean;
+  highlightCurrentBlock?: boolean;
+  typewriterScroll?: boolean;
 }>();
 const emit = defineEmits<{
   'update:modelValue': [value: string];
@@ -256,6 +261,83 @@ const documentSyncPlugin = $prose(
           changeTimer = setTimeout(flush, 120);
         },
       }),
+    }),
+);
+
+const caretKey = new PluginKey<DecorationSet>('vivin-caret');
+function currentBlock(state: EditorState): DecorationSet {
+  const { selection } = state;
+  const $head = selection.$head;
+  if (
+    !props.highlightCurrentBlock ||
+    !selection.empty ||
+    !$head.depth ||
+    !$head.parent.isTextblock ||
+    $head.parent.type.name === 'code_block'
+  )
+    return DecorationSet.empty;
+  return DecorationSet.create(state.doc, [
+    Decoration.node($head.before(), $head.after(), { class: 'vivin-current-block' }),
+  ]);
+}
+let caretFrame = 0;
+let pointerSelecting = false;
+function centerCaret(head: number) {
+  cancelAnimationFrame(caretFrame);
+  caretFrame = requestAnimationFrame(() => {
+    if (!crepe || disposed || !container.value) return;
+    const scroller = container.value;
+    crepe.editor.action((context) => {
+      const view = context.get(editorViewCtx);
+      const caret = view.coordsAtPos(Math.min(head, view.state.doc.content.size));
+      const rect = scroller.getBoundingClientRect();
+      scroller.scrollTop += caret.top - (rect.top + rect.height / 2);
+    });
+  });
+}
+/** Current-block highlight and typewriter scrolling follow the caret, not the pointer. */
+const caretPlugin = $prose(
+  () =>
+    new Plugin<DecorationSet>({
+      key: caretKey,
+      state: {
+        init: (_config, state) => currentBlock(state),
+        apply: (transaction, value, previous, state) =>
+          transaction.docChanged ||
+          transaction.getMeta(caretKey) ||
+          !previous.selection.eq(state.selection)
+            ? currentBlock(state)
+            : value,
+      },
+      props: {
+        decorations: (state) => caretKey.getState(state) ?? DecorationSet.empty,
+        handleDOMEvents: {
+          mousedown: () => {
+            pointerSelecting = true;
+            return false;
+          },
+          keydown: () => {
+            pointerSelecting = false;
+            return false;
+          },
+        },
+      },
+      view: () => ({
+        update(view, previous) {
+          if (!props.typewriterScroll || pointerSelecting || !view.hasFocus()) return;
+          if (previous.doc.eq(view.state.doc) && previous.selection.eq(view.state.selection))
+            return;
+          centerCaret(view.state.selection.head);
+        },
+      }),
+    }),
+);
+watch(
+  () => props.highlightCurrentBlock,
+  () =>
+    crepe?.editor.action((context) => {
+      const view = context.get(editorViewCtx);
+      view.dispatch(view.state.tr.setMeta(caretKey, true));
     }),
 );
 
@@ -538,10 +620,13 @@ onMounted(async () => {
         },
       }));
     });
+    // Milkdown writes empty paragraphs as `<br />`; keep them out of the saved Markdown.
+    await instance.editor.remove(remarkPreserveEmptyLinePlugin);
     instance.editor
       .use(preserveSource)
       .use(sourceBlock)
       .use(annotationPlugin)
+      .use(caretPlugin)
       .use(documentSyncPlugin);
     await instance.create();
     if (disposed) {
@@ -576,6 +661,23 @@ onMounted(async () => {
   }
 });
 
+// Live headings carry ids from Milkdown's sync plugin while freshly parsed ones are empty;
+// assign them the same way so the diff below does not span every heading.
+function withHeadingIds(context: Ctx, doc: ProseNode): ProseNode {
+  const getId = context.get(headingIdGenerator.key);
+  const seen = new Map<string, number>();
+  const transform = new Transform(doc);
+  doc.descendants((node, position) => {
+    if (node.type.name !== 'heading' || !node.textContent.trim()) return;
+    let id = getId(node);
+    const count = (seen.get(id) ?? 0) + 1;
+    seen.set(id, count);
+    if (count > 1) id += `-#${count}`;
+    if (node.attrs.id !== id) transform.setNodeMarkup(position, undefined, { ...node.attrs, id });
+  });
+  return transform.doc;
+}
+
 function applyMarkdown(value: string, addToHistory = false) {
   if (!crepe || editorMarkdown === value) return;
   const scrollTop = container.value?.scrollTop ?? 0;
@@ -590,6 +692,8 @@ function applyMarkdown(value: string, addToHistory = false) {
       const schema = context.get(schemaCtx);
       const raw = sourceBlock.type(context).create(null, value ? schema.text(value) : undefined);
       doc = schema.topNodeType.create(null, raw);
+    } else {
+      doc = withHeadingIds(context, doc);
     }
     const start = view.state.doc.content.findDiffStart(doc.content);
     if (start === null) return;
@@ -655,6 +759,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  cancelAnimationFrame(caretFrame);
   if (changeTimer) clearTimeout(changeTimer);
   disposed = true;
   mermaidRequests.clear();
@@ -673,6 +778,7 @@ onBeforeUnmount(() => {
         editorReady ? 'opacity-100' : 'opacity-0',
         embedded ? 'rendered-editor-embedded' : 'h-full overflow-y-auto',
         !embedded && modelValue.length >= 100_000 ? 'rendered-editor-large' : '',
+        typewriterScroll && !embedded ? 'is-typewriter' : '',
       ]"
       @click.capture="handleRenderedClick"
       @focusout="flush"
@@ -697,11 +803,18 @@ onBeforeUnmount(() => {
   min-height: 100%;
   min-width: 0;
 }
+.rendered-editor.is-typewriter .milkdown .ProseMirror {
+  padding-bottom: 50vh;
+}
 .rendered-editor-large .milkdown .ProseMirror > * {
   content-visibility: auto;
   contain-intrinsic-size: auto 100px;
 }
+.rendered-editor .milkdown .milkdown-code-block:has(.codemirror-host.hidden) {
+  background: transparent;
+}
 .rendered-editor .milkdown .milkdown-code-block .preview svg {
+  margin-inline: auto;
   max-width: 100%;
   height: auto;
   cursor: zoom-in;

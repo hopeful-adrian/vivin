@@ -38,7 +38,7 @@ export interface Command {
   run: () => unknown;
 }
 
-export const settingsTab = ref<'general' | 'editor' | 'shortcuts' | 'about'>('general');
+export const settingsTab = ref<'general' | 'text' | 'editor' | 'shortcuts' | 'about'>('general');
 const { preferences, theme } = usePreferences();
 
 export function openSettings(tab: typeof settingsTab.value = 'general') {
@@ -151,7 +151,7 @@ export const commands = computed<Command[]>(() => {
       group: file,
       shortcut: 'mod+s',
       enabled: hasProject,
-      run: () => documents.saveAll(),
+      run: () => documents.saveAll(preferences.formatOnSave),
     },
     {
       id: 'search',
@@ -180,8 +180,8 @@ export const commands = computed<Command[]>(() => {
       id: 'toggle-mode',
       title:
         pane?.mode === 'source'
-          ? t('切换到排版模式', 'Switch to rendered mode')
-          : t('切换到源代码模式', 'Switch to source mode'),
+          ? t('关闭源代码（回到排版）', 'Turn off source (back to rendered)')
+          : t('打开源代码', 'Turn on source'),
       group: documentGroup,
       shortcut: 'mod+/',
       enabled: hasDocument,

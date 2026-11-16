@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { markdown } from '@codemirror/lang-markdown';
-import { Compartment, EditorState, StateEffect, StateField } from '@codemirror/state';
+import { indentUnit } from '@codemirror/language';
+import {
+  Compartment,
+  EditorState,
+  StateEffect,
+  StateField,
+  type Transaction,
+} from '@codemirror/state';
 import { Decoration, EditorView, keymap, type DecorationSet } from '@codemirror/view';
 import { basicSetup } from 'codemirror';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -9,9 +16,18 @@ import type { SearchRange } from '../lib/document-search';
 import { minimalDocumentChange } from '../lib/document-change';
 import { importImage, type AnnotationKind } from '../lib/project-api';
 
+export interface SourceEditorOptions {
+  lineNumbers: boolean;
+  lineWrapping: boolean;
+  indentWidth: number;
+  highlightCurrentLine: boolean;
+  typewriterScroll: boolean;
+}
+
 const props = defineProps<{
   modelValue: string;
   documentPath: string;
+  options: SourceEditorOptions;
   readonly?: boolean;
   annotations?: AnnotationMark[];
   locale?: 'zh' | 'en';
@@ -33,6 +49,8 @@ const ready = new Promise<void>((resolve) => {
   resolveReady = resolve;
 });
 const readonlyCompartment = new Compartment();
+const wrappingCompartment = new Compartment();
+const indentCompartment = new Compartment();
 const updateSearch = StateEffect.define<null>();
 const updateAnnotations = StateEffect.define<AnnotationMark[]>();
 
@@ -124,7 +142,8 @@ onMounted(() => {
       extensions: [
         basicSetup,
         markdown(),
-        EditorView.lineWrapping,
+        wrappingCompartment.of(wrapping(props.options.lineWrapping)),
+        indentCompartment.of(indentation(props.options.indentWidth)),
         readonlyCompartment.of(EditorView.editable.of(!props.readonly)),
         annotationsField,
         searchField,
@@ -158,6 +177,8 @@ onMounted(() => {
           if (update.docChanged && !applyingExternalChange) {
             emit('update:modelValue', update.state.doc.toString());
           }
+          if (props.options.typewriterScroll && update.transactions.some(movesCaretByKeyboard))
+            centerCaret();
           const selection = update.state.selection.main;
           if (props.readonly || selection.empty || !container.value) {
             selectionToolbar.value = null;
@@ -194,6 +215,42 @@ watch(
     editor?.dispatch({ effects: readonlyCompartment.reconfigure(EditorView.editable.of(!value)) }),
 );
 
+function wrapping(enabled: boolean) {
+  return enabled ? EditorView.lineWrapping : [];
+}
+
+function indentation(width: number) {
+  return [indentUnit.of(' '.repeat(width)), EditorState.tabSize.of(width)];
+}
+
+function movesCaretByKeyboard(transaction: Transaction): boolean {
+  if (transaction.isUserEvent('select.pointer')) return false;
+  return ['input', 'delete', 'undo', 'redo', 'select', 'move'].some((event) =>
+    transaction.isUserEvent(event),
+  );
+}
+
+let centerFrame = 0;
+function centerCaret() {
+  cancelAnimationFrame(centerFrame);
+  centerFrame = requestAnimationFrame(() => {
+    if (!editor) return;
+    editor.dispatch({
+      effects: EditorView.scrollIntoView(editor.state.selection.main.head, { y: 'center' }),
+    });
+  });
+}
+
+watch(
+  () => props.options.lineWrapping,
+  (value) => editor?.dispatch({ effects: wrappingCompartment.reconfigure(wrapping(value)) }),
+);
+
+watch(
+  () => props.options.indentWidth,
+  (value) => editor?.dispatch({ effects: indentCompartment.reconfigure(indentation(value)) }),
+);
+
 watch(
   () => props.annotations,
   (marks) => editor?.dispatch({ effects: updateAnnotations.of(marks ?? []) }),
@@ -209,6 +266,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  cancelAnimationFrame(centerFrame);
   resolveReady();
   editor?.destroy();
   editor = undefined;
@@ -261,7 +319,15 @@ defineExpose({ reveal, selectedText, replaceMatches, focus: () => editor?.focus(
 </script>
 
 <template>
-  <div ref="container" class="source-editor relative h-full overflow-auto text-sm">
+  <div
+    ref="container"
+    class="source-editor relative h-full overflow-auto text-sm"
+    :class="{
+      'hide-line-numbers': !options.lineNumbers,
+      'hide-current-line': !options.highlightCurrentLine,
+      'is-typewriter': options.typewriterScroll,
+    }"
+  >
     <div
       v-if="selectionToolbar"
       class="selection-annotation-toolbar fixed z-30 flex gap-1 rounded-xl bg-white p-1.5 shadow-lg"
@@ -331,5 +397,15 @@ defineExpose({ reveal, selectedText, replaceMatches, focus: () => editor?.focus(
 
 .source-editor .cm-focused {
   outline: none;
+}
+.source-editor.hide-line-numbers .cm-lineNumbers {
+  display: none !important;
+}
+.app-shell .source-editor.hide-current-line .cm-activeLine,
+.app-shell .source-editor.hide-current-line .cm-activeLineGutter {
+  background: transparent;
+}
+.source-editor.is-typewriter .cm-content {
+  padding-bottom: 45vh;
 }
 </style>
