@@ -1,11 +1,18 @@
 <script setup lang="ts">
 import { Maximize, Minus, Plus, X } from '@lucide/vue';
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 
-defineProps<{ svg: string; locale?: 'zh' | 'en' }>();
+const props = defineProps<{ svg: string; locale?: 'zh' | 'en' }>();
 const emit = defineEmits<{ close: [] }>();
 const dialog = ref<HTMLDialogElement>();
 const zoom = ref(1);
+// Images decode SVG as strict XML, so HTML-serialized labels such as `<br>` must be re-serialized.
+const imageSource = computed(() => {
+  const svg = new DOMParser().parseFromString(props.svg, 'text/html').querySelector('svg');
+  return svg
+    ? `data:image/svg+xml,${encodeURIComponent(new XMLSerializer().serializeToString(svg))}`
+    : '';
+});
 onMounted(() => dialog.value?.showModal());
 </script>
 
@@ -60,10 +67,7 @@ onMounted(() => dialog.value?.showModal());
       <div class="diagram-viewport">
         <!-- An image document isolates SVG IDs from the inline diagram. -->
         <div class="diagram-zoom" :style="{ width: `${zoom * 100}%` }">
-          <img
-            :src="`data:image/svg+xml,${encodeURIComponent(svg)}`"
-            :alt="locale === 'en' ? 'Expanded diagram' : '放大的图表'"
-          />
+          <img :src="imageSource" :alt="locale === 'en' ? 'Expanded diagram' : '放大的图表'" />
         </div>
       </div>
     </div>
