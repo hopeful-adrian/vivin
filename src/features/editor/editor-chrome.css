@@ -169,6 +169,18 @@
   color: var(--document-text);
   box-shadow: 0 24px 100px #0004;
 }
+.diagram-dialog.is-fullscreen {
+  width: 100vw;
+  max-width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  border: 0;
+  border-radius: 0;
+}
+[data-platform='macos'] .diagram-dialog.is-fullscreen .diagram-toolbar {
+  min-height: 56px;
+  padding-left: 88px;
+}
 .diagram-dialog::backdrop {
   background: #0d1a2b99;
   backdrop-filter: blur(5px);

@@ -1,11 +1,21 @@
 <script setup lang="ts">
-import { Maximize, Minus, Plus, X } from '@lucide/vue';
+import { Maximize2, Minimize2, Minus, MoveHorizontal, Plus, X } from '@lucide/vue';
 import { computed, onMounted, ref } from 'vue';
 
 const props = defineProps<{ svg: string; locale?: 'zh' | 'en' }>();
 const emit = defineEmits<{ close: [] }>();
 const dialog = ref<HTMLDialogElement>();
 const zoom = ref(1);
+const fullscreen = ref(false);
+const fullscreenLabel = computed(() =>
+  fullscreen.value
+    ? props.locale === 'en'
+      ? 'Exit full screen'
+      : '退出全屏'
+    : props.locale === 'en'
+      ? 'Full screen'
+      : '全屏',
+);
 // Images decode SVG as strict XML, so HTML-serialized labels such as `<br>` must be re-serialized.
 const imageSource = computed(() => {
   const svg = new DOMParser().parseFromString(props.svg, 'text/html').querySelector('svg');
@@ -19,7 +29,7 @@ onMounted(() => dialog.value?.showModal());
 <template>
   <dialog
     ref="dialog"
-    class="diagram-dialog"
+    :class="['diagram-dialog', { 'is-fullscreen': fullscreen }]"
     :aria-label="locale === 'en' ? 'Diagram viewer' : '图表查看器'"
     @close="emit('close')"
     @click="$event.target === dialog && dialog?.close()"
@@ -57,8 +67,21 @@ onMounted(() => dialog.value?.showModal());
         >
           <Plus :size="16" />
         </button>
-        <button :title="locale === 'en' ? 'Fit to width' : '适应宽度'" @click="zoom = 1">
-          <Maximize :size="16" />
+        <button
+          :title="locale === 'en' ? 'Fit to width' : '适应宽度'"
+          :aria-label="locale === 'en' ? 'Fit to width' : '适应宽度'"
+          @click="zoom = 1"
+        >
+          <MoveHorizontal :size="16" />
+        </button>
+        <button
+          :title="fullscreenLabel"
+          :aria-label="fullscreenLabel"
+          :aria-pressed="fullscreen"
+          @click="fullscreen = !fullscreen"
+        >
+          <Minimize2 v-if="fullscreen" :size="16" />
+          <Maximize2 v-else :size="16" />
         </button>
         <button autofocus :aria-label="locale === 'en' ? 'Close' : '关闭'" @click="dialog?.close()">
           <X :size="18" />
