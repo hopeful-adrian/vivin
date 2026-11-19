@@ -43,11 +43,11 @@ vivin 将一个普通文件夹作为写作项目。正文始终是可由其他�
 
 ### 获取应用
 
-正式版本发布在 [GitHub Releases](https://github.com/hopeful-adrian/vivin/releases)，提供 macOS Apple Silicon、macOS Intel 和 Windows x64 安装包；也可以按下文从源码构建。安装包目前尚未经过 Apple 公证和 Windows 代码签名，首次打开时可能受到系统的安装限制。推送到 `main` 的每次提交由 [Desktop build 工作流](https://github.com/hopeful-adrian/vivin/actions/workflows/desktop-build.yml) 构建，结果仅作为 Actions artifacts 保存，不会推送给已安装的应用。
+正式版本发布在 [GitHub Releases](https://github.com/hopeful-adrian/vivin/releases)，提供 macOS Apple Silicon、macOS Intel 和 Windows x64 安装包；也可以按下文从源码构建。安装包目前尚未经过 Apple 公证和 Windows 代码签名，首次打开时可能受到系统的安装限制。推送到 `main` 的每次提交由 [Desktop build 工作流](https://github.com/hopeful-adrian/vivin/actions/workflows/desktop-build.yml) 构建，结果仅作为 Actions artifacts 保存；只有版本号升高的提交才会由 [Release 工作流](https://github.com/hopeful-adrian/vivin/actions/workflows/release.yml) 自动构建并发布为新版本，推送给已安装的应用（见“开发”文档中的发版步骤）。
 
 ### 更新
 
-安装后，vivin 启动时每天最多检查一次新版本（可在“设置 → 关于”中关闭），也可以在那里手动检查。发现新版本时会提示“更新并重启”：应用在后台下载更新包，下载完成后先保存全部文档，再安装并重启。更新包使用 vivin 的更新签名校验，签名不符时不会安装。只有在 GitHub Releases 中正式发布的版本才会推送，普通提交、草稿和预发布版不会触发更新。
+安装后，vivin 启动时每天最多检查一次新版本（可在“设置 → 关于”中关闭），也可以在那里手动检查。发现新版本时会提示“更新并重启”：应用在后台下载更新包，下载完成后先保存全部文档，再安装并重启。更新包使用 vivin 的更新签名校验，签名不符时不会安装。只有在 GitHub Releases 中正式发布的版本才会推送，普通提交、草稿和预发布版不会触发更新；所有平台构建成功后，Release 工作流才会自动发布。
 
 ### 创建项目
 

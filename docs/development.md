@@ -87,9 +87,9 @@ Rust 工具链安装后，在 `src-tauri/` 运行 `cargo fmt --check`、`cargo c
 
 每次发版：
 
-1. 同步修改 `package.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 中的版本号并提交。
-2. 推送 tag：`git tag v0.2.0 && git push origin v0.2.0`。`.github/workflows/release.yml` 会核对三个版本号与 tag 一致，创建 Release 草稿，再构建 macOS（Apple Silicon、Intel）和 Windows 安装包、带签名的更新包及 `latest.json`，上传到该草稿。
-3. 在 GitHub Releases 中检查草稿、填写更新说明并点击发布。发布后，已安装的应用才会检查到新版本；更新说明会显示在 Release 页面。
+1. 在干净的 `main` 上运行 `pnpm release`（补丁号 +1；也可写 `minor`、`major` 或具体版本号如 `0.2.0`，加 `--no-push` 只提交不推送）。脚本同步修改 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 和 `src-tauri/tauri.conf.json` 中的版本号，拒绝不高于当前的版本，提交 `chore(release): 发布 x.y.z` 并推送 `main`。
+2. `.github/workflows/release.yml` 在每次推送 `main` 时运行：核对三个版本号一致；若 `v<版本号>` tag 已存在就跳过，因此普通提交不会发版。否则创建 Release 草稿（自动生成更新说明），构建 macOS（Apple Silicon、Intel）和 Windows 安装包、带签名的更新包及 `latest.json` 上传到草稿，全部成功且 `latest.json` 存在后自动发布，tag 在发布时创建。已安装的应用随后即可检查到新版本。
+3. 任一平台失败时草稿不会发布，已安装的应用不受影响。修复后可在 Actions 中重新运行，或推送修复提交；旧草稿会被删除后重建。发布后可在 GitHub Releases 中补充更新说明。
 
 本地 `pnpm tauri build` 默认不生成更新包，不需要私钥。要在本地验证更新包，先设置 `TAURI_SIGNING_PRIVATE_KEY` 与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，再附加 `--config src-tauri/tauri.release.conf.json`。
 
