@@ -1,6 +1,6 @@
 [package]
 name = "vivin"
-version = "0.1.0"
+version = "0.1.1"
 description = "Offline Markdown desktop workspace"
 license = "MIT"
 edition = "2024"
