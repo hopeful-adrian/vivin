@@ -103,6 +103,32 @@ export function renderedRanges(
   return ranges;
 }
 
+/** Source slice covered by a rendered selection. Positions are editor positions. */
+export function sourceSliceForPositions(
+  source: string,
+  mapping: Map<number, number>,
+  from: number,
+  to: number,
+): { quote: string; offset: number } | null {
+  if (to <= from) return null;
+  const hits: number[] = [];
+  for (const [offset, position] of mapping) {
+    if (position >= from && position < to) hits.push(offset);
+  }
+  if (!hits.length) return null;
+  hits.sort((left, right) => left - right);
+  const start = hits[0];
+  const last = hits[hits.length - 1];
+  if (start === undefined || last === undefined) return null;
+  const end = last + 1;
+  for (let index = start; index < end; index++) {
+    const position = mapping.get(index);
+    if (position !== undefined && (position < from || position >= to)) return null;
+  }
+  const quote = source.slice(start, end);
+  return quote ? { quote, offset: start } : null;
+}
+
 export function nearestRenderedPosition(
   mapping: Map<number, number>,
   offset: number,

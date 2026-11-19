@@ -204,7 +204,9 @@ export async function jumpTo(path: string, offset: number, length = 0, annotatio
     pane.searchMatches = length ? [{ offset, length }] : [];
     pane.activeSearchOffset = offset;
   }
-  if (pane.mode === 'source') {
+  if (annotationId) {
+    if (pane.mode !== 'rendered') setMode(paneIndex, 'rendered');
+  } else if (pane.mode === 'source') {
     pendingJump = null;
     sourceRevealRequests.value[paneIndex] = { offset, length, token: ++revealToken };
     return;

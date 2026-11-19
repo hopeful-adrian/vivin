@@ -379,18 +379,12 @@ const formatTitle = computed(() => `${t('格式化文档', 'Format document')} $
               :document-path="pane.path"
               :options="sourceOptions"
               :reveal-request="sourceRevealRequests[index] ?? undefined"
-              :annotations="marks"
               :search-matches="pane.searchMatches"
               :active-search-offset="pane.activeSearchOffset"
               :readonly="!!locked"
-              :locale="locale"
               class="min-w-0 flex-1"
               @update:model-value="setContent"
               @error="notify($event, 'error')"
-              @annotation-request="
-                (kind: AnnotationKind, selection: { quote: string; offset: number }) =>
-                  requestEditorAnnotation(index, kind, selection)
-              "
             />
             <MarkdownRenderedEditor
               v-else
@@ -419,7 +413,7 @@ const formatTitle = computed(() => `${t('格式化文档', 'Format document')} $
             />
           </div>
           <div
-            v-if="preferences.annotationMinimap"
+            v-if="preferences.annotationMinimap && pane.mode === 'rendered'"
             class="annotation-minimap relative flex w-8 shrink-0 flex-col items-center py-2"
           >
             <div class="group relative mb-2">

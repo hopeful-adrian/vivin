@@ -19,6 +19,7 @@ import {
   renderedTextMap,
   renderedRanges,
   nearestRenderedPosition,
+  sourceSliceForPositions,
   type RenderedTextRun,
 } from '../lib/rendered-text-map';
 import { replaceDocumentMatches, type SearchRange } from '../lib/document-search';
@@ -160,8 +161,8 @@ function keepHorizontalPosition() {
 let indexedDocument: object | undefined;
 let indexedSource = '';
 let textMapping = new Map<number, number>();
-function sourceMapping(state: EditorState) {
-  if (indexedDocument !== state.doc || indexedSource !== props.modelValue) {
+function sourceMapping(state: EditorState, source = props.modelValue) {
+  if (indexedDocument !== state.doc || indexedSource !== source) {
     const runs: RenderedTextRun[] = [];
     state.doc.descendants((node, position) => {
       if (node.isText && node.text) runs.push({ text: node.text, position });
@@ -169,9 +170,9 @@ function sourceMapping(state: EditorState) {
         runs.push({ text: node.attrs.value, position, atomic: true });
       }
     });
-    textMapping = renderedTextMap(props.modelValue, runs);
+    textMapping = renderedTextMap(source, runs);
     indexedDocument = state.doc;
-    indexedSource = props.modelValue;
+    indexedSource = source;
   }
   return textMapping;
 }
@@ -241,7 +242,7 @@ async function revealHeading(offset: number): Promise<boolean> {
   return true;
 }
 
-function flush() {
+function flush(): string | undefined {
   if (changeTimer) clearTimeout(changeTimer);
   changeTimer = undefined;
   if (!pendingChanges || !crepe || applyingExternalChange || disposed) return;
@@ -249,6 +250,7 @@ function flush() {
   const markdown = crepe.getMarkdown();
   editorMarkdown = markdown;
   if (markdown !== props.modelValue) emit('update:modelValue', markdown);
+  return markdown;
 }
 const documentSyncPlugin = $prose(
   () =>
@@ -374,17 +376,6 @@ async function uploadImage(file: File): Promise<string> {
   }
 }
 
-function occurrences(text: string, quote: string): number[] {
-  const offsets: number[] = [];
-  let from = 0;
-  while (from < text.length) {
-    const next = text.indexOf(quote, from);
-    if (next < 0) break;
-    offsets.push(next);
-    from = next + Math.max(1, quote.length);
-  }
-  return offsets;
-}
 const annotationIcons: Record<AnnotationKind, string> = {
   todo: '<svg viewBox="0 0 24 24"><path d="m5 12 4 4 10-10" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
   comment:
@@ -396,27 +387,15 @@ const annotationIcons: Record<AnnotationKind, string> = {
 };
 const markRefreshKey = new PluginKey<DecorationSet>('vivin-marks');
 function requestAnnotation(kind: AnnotationKind, context: Ctx) {
-  flush();
+  const source = flush() ?? props.modelValue;
   const view = context.get(editorViewCtx);
   const { from, to } = view.state.selection;
-  const quote = view.state.doc.textBetween(from, to, '', '');
-  if (!quote) return;
-  const visible = view.state.doc.textBetween(0, view.state.doc.content.size, '', '');
-  const prefix = view.state.doc.textBetween(0, from, '', '');
-  const rank = occurrences(prefix, quote).length;
-  const raw = occurrences(editorMarkdown || props.modelValue, quote);
-  const matches = occurrences(visible, quote);
-  const offset = raw.length === matches.length ? raw[rank] : raw.length === 1 ? raw[0] : undefined;
-  if (offset === undefined) {
-    emit(
-      'error',
-      props.locale === 'en'
-        ? 'Cannot locate this selection. Try source mode.'
-        : '无法准确定位选中文字，请切换原文模式重试',
-    );
+  const selected = sourceSliceForPositions(source, sourceMapping(view.state, source), from, to);
+  if (!selected) {
+    emit('error', props.locale === 'en' ? 'Cannot locate this selection.' : '无法定位这段选中文字');
     return;
   }
-  emit('annotation-request', kind, { quote, offset });
+  emit('annotation-request', kind, selected);
 }
 
 const annotationPlugin = $prose(() => {

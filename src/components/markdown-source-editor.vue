@@ -11,10 +11,9 @@ import {
 import { Decoration, EditorView, keymap, type DecorationSet } from '@codemirror/view';
 import { basicSetup } from 'codemirror';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { AnnotationMark } from '../lib/annotation-anchor';
 import type { SearchRange } from '../lib/document-search';
 import { minimalDocumentChange } from '../lib/document-change';
-import { importImage, type AnnotationKind } from '../lib/project-api';
+import { importImage } from '../lib/project-api';
 
 export interface SourceEditorOptions {
   lineNumbers: boolean;
@@ -29,8 +28,6 @@ const props = defineProps<{
   documentPath: string;
   options: SourceEditorOptions;
   readonly?: boolean;
-  annotations?: AnnotationMark[];
-  locale?: 'zh' | 'en';
   searchMatches?: SearchRange[];
   activeSearchOffset?: number;
   revealRequest?: { offset: number; length: number; token: number };
@@ -38,10 +35,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:modelValue': [value: string];
   error: [message: string];
-  'annotation-request': [kind: AnnotationKind, selection: { quote: string; offset: number }];
 }>();
 const container = ref<HTMLDivElement>();
-const selectionToolbar = ref<{ quote: string; offset: number; x: number; y: number } | null>(null);
 let editor: EditorView | undefined;
 let applyingExternalChange = false;
 let resolveReady: () => void = () => {};
@@ -52,7 +47,6 @@ const readonlyCompartment = new Compartment();
 const wrappingCompartment = new Compartment();
 const indentCompartment = new Compartment();
 const updateSearch = StateEffect.define<null>();
-const updateAnnotations = StateEffect.define<AnnotationMark[]>();
 
 async function insertImage(file: File, position: number) {
   try {
@@ -69,33 +63,6 @@ async function insertImage(file: File, position: number) {
     emit('error', String(error));
   }
 }
-
-function buildDecorations(marks: AnnotationMark[], documentLength: number): DecorationSet {
-  return Decoration.set(
-    marks
-      .filter((mark) => mark.offset >= 0 && mark.offset + mark.length <= documentLength)
-      .map((mark) =>
-        Decoration.mark({
-          class: `vivin-annotation vivin-annotation-${mark.kind}`,
-          'data-annotation-id': mark.id,
-        }).range(mark.offset, mark.offset + mark.length),
-      ),
-    true,
-  );
-}
-
-const annotationsField = StateField.define<DecorationSet>({
-  create: (state) => buildDecorations(props.annotations ?? [], state.doc.length),
-  update(value, transaction) {
-    for (const effect of transaction.effects)
-      if (effect.is(updateAnnotations))
-        return buildDecorations(effect.value, transaction.state.doc.length);
-    return transaction.docChanged
-      ? buildDecorations(props.annotations ?? [], transaction.state.doc.length)
-      : value;
-  },
-  provide: (field) => EditorView.decorations.from(field),
-});
 
 function searchDecorations(documentLength: number): DecorationSet {
   return Decoration.set(
@@ -145,7 +112,6 @@ onMounted(() => {
         wrappingCompartment.of(wrapping(props.options.lineWrapping)),
         indentCompartment.of(indentation(props.options.indentWidth)),
         readonlyCompartment.of(EditorView.editable.of(!props.readonly)),
-        annotationsField,
         searchField,
         EditorView.domEventHandlers({
           paste(event, view) {
@@ -179,19 +145,6 @@ onMounted(() => {
           }
           if (props.options.typewriterScroll && update.transactions.some(movesCaretByKeyboard))
             centerCaret();
-          const selection = update.state.selection.main;
-          if (props.readonly || selection.empty || !container.value) {
-            selectionToolbar.value = null;
-            return;
-          }
-          const coordinates = update.view.coordsAtPos(selection.from);
-          if (!coordinates) return;
-          selectionToolbar.value = {
-            quote: update.state.doc.sliceString(selection.from, selection.to),
-            offset: selection.from,
-            x: Math.max(8, Math.min(coordinates.left, window.innerWidth - 300)),
-            y: Math.max(60, coordinates.top - 48),
-          };
         }),
       ],
     }),
@@ -249,12 +202,6 @@ watch(
 watch(
   () => props.options.indentWidth,
   (value) => editor?.dispatch({ effects: indentCompartment.reconfigure(indentation(value)) }),
-);
-
-watch(
-  () => props.annotations,
-  (marks) => editor?.dispatch({ effects: updateAnnotations.of(marks ?? []) }),
-  { deep: true },
 );
 
 watch(
@@ -327,44 +274,7 @@ defineExpose({ reveal, selectedText, replaceMatches, focus: () => editor?.focus(
       'hide-current-line': !options.highlightCurrentLine,
       'is-typewriter': options.typewriterScroll,
     }"
-  >
-    <div
-      v-if="selectionToolbar"
-      class="selection-annotation-toolbar fixed z-30 flex gap-1 rounded-xl bg-white p-1.5 shadow-lg"
-      :style="{ left: `${selectionToolbar.x}px`, top: `${selectionToolbar.y}px` }"
-      @pointerdown.prevent
-    >
-      <button
-        v-for="kind in ['todo', 'comment', 'question', 'error'] as const"
-        :key="kind"
-        class="rounded-md px-2 py-1 text-xs hover:bg-slate-100"
-        :title="
-          {
-            todo: locale === 'en' ? 'Todo' : '待办',
-            comment: locale === 'en' ? 'Comment' : '批注',
-            question: locale === 'en' ? 'Question' : '疑问',
-            error: locale === 'en' ? 'Error' : '错误',
-          }[kind]
-        "
-        @click.stop="
-          emit('annotation-request', kind, {
-            quote: selectionToolbar!.quote,
-            offset: selectionToolbar!.offset,
-          });
-          selectionToolbar = null;
-        "
-      >
-        {{
-          {
-            todo: locale === 'en' ? 'Todo' : '待办',
-            comment: locale === 'en' ? 'Comment' : '批注',
-            question: locale === 'en' ? 'Question' : '疑问',
-            error: locale === 'en' ? 'Error' : '错误',
-          }[kind]
-        }}
-      </button>
-    </div>
-  </div>
+  />
 </template>
 
 <style>

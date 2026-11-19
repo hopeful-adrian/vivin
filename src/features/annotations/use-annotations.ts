@@ -236,13 +236,7 @@ export async function addAnnotation(
   }
   const { quote, offset } = selected;
   if (doc.content.slice(offset, offset + quote.length) !== quote) {
-    notify(
-      t(
-        '无法准确定位选中文字，请切换原文模式重试',
-        'Cannot locate the selection. Try source mode.',
-      ),
-      'warning',
-    );
+    notify(t('无法定位这段选中文字', 'Cannot locate this selection.'), 'warning');
     return;
   }
   const note = await requestText(t('标注说明（可留空）', 'Annotation note (optional)'), '', {
