@@ -13,6 +13,7 @@ const { preferences } = usePreferences();
 
 export const platform = ref<Platform>('macos');
 export const windowExpanded = ref(false);
+export const windowFullscreen = ref(false);
 export const sidebarOpen = ref(window.innerWidth >= narrowWidth);
 let autoCollapsed = !sidebarOpen.value;
 export const focusMode = ref(false);

@@ -7,6 +7,8 @@ defineProps<{
   sidebarOpen: boolean;
   sidebarWidth: number;
   platform: 'macos' | 'windows' | 'linux';
+  /** macOS draws its window buttons over this corner outside full screen. */
+  trafficLights: boolean;
   locale?: 'zh' | 'en';
 }>();
 
@@ -20,14 +22,8 @@ async function runWindowAction(action: 'close' | 'minimize' | 'toggleMaximize') 
   <header class="flex h-13 shrink-0 items-center bg-[#f3f6fa] text-slate-800">
     <div
       :class="[
-        'flex h-full shrink-0 items-center px-4',
-        platform === 'macos'
-          ? sidebarOpen
-            ? 'w-64 justify-end'
-            : 'w-36 justify-end'
-          : sidebarOpen
-            ? 'w-64 justify-between'
-            : 'w-28 justify-start gap-5',
+        'flex h-full shrink-0 items-center gap-1 pr-3',
+        trafficLights ? 'pl-[84px]' : 'pl-3',
       ]"
       :style="sidebarOpen ? { width: `${sidebarWidth}px` } : undefined"
       data-tauri-drag-region

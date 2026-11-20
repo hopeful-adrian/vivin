@@ -18,7 +18,7 @@ import { checkForUpdates } from '../settings/use-updates';
 import { confirmAction } from '../ui/use-dialog';
 import { report } from '../ui/use-toast';
 import { flushEditors } from './editor-registry';
-import { platform, windowExpanded } from './use-layout';
+import { platform, windowExpanded, windowFullscreen } from './use-layout';
 
 /** File watching covers normal disks; this slower check covers network and synced folders. */
 const fallbackInterval = 15_000;
@@ -42,8 +42,8 @@ export function installNativeEvents(): () => void {
       .catch(report);
     const currentWindow = getCurrentWindow();
     const syncWindowSize = async () => {
-      windowExpanded.value =
-        (await currentWindow.isFullscreen()) || (await currentWindow.isMaximized());
+      windowFullscreen.value = await currentWindow.isFullscreen();
+      windowExpanded.value = windowFullscreen.value || (await currentWindow.isMaximized());
     };
     void syncWindowSize();
     keep(currentWindow.onResized(() => void syncWindowSize()));
