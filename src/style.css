@@ -277,6 +277,9 @@ label:has(select:not(:disabled)),
 .app-shell .markdown-canvas .milkdown .ProseMirror p {
   line-height: var(--document-line-height, 1.5);
 }
+.app-shell .milkdown blockquote {
+  color: color-mix(in srgb, var(--crepe-color-on-background) 62%, transparent);
+}
 /* The note sits outside the document canvas, so it has to opt into the same type size. */
 .app-shell #vivin-annotation-popover .milkdown {
   --crepe-base-font-size: var(--editor-font-size, 16px);
