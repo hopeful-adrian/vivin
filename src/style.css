@@ -274,8 +274,13 @@ label:has(select:not(:disabled)),
   max-width: calc(var(--document-width, 100%) + 240px);
   margin-inline: auto;
 }
-.app-shell .markdown-canvas .milkdown .ProseMirror p {
+.app-shell .markdown-canvas .milkdown .ProseMirror p:not(:where(svg p)) {
   line-height: var(--document-line-height, 1.5);
+}
+/* Crepe pads every paragraph, including HTML labels that Mermaid already measured. */
+.milkdown .ProseMirror svg[id^='vivin-mermaid-'] foreignObject p {
+  padding: 0;
+  line-height: inherit;
 }
 .app-shell .milkdown blockquote {
   color: color-mix(in srgb, var(--crepe-color-on-background) 62%, transparent);
@@ -292,7 +297,7 @@ label:has(select:not(:disabled)),
   --crepe-font-title: var(--editor-font-family), var(--document-font);
 }
 .app-shell #vivin-annotation-popover .annotation-markdown-content,
-.app-shell #vivin-annotation-popover .annotation-markdown-content p {
+.app-shell #vivin-annotation-popover .annotation-markdown-content p:not(:where(svg p)) {
   font-size: var(--editor-font-size, 16px);
   line-height: var(--document-line-height, 1.5);
 }
